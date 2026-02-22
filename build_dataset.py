@@ -934,8 +934,8 @@ def main():
     )
     ap.add_argument(
         "--ood_cap_source",
-        default="raw.githubusercontent.com",
-        help="Source prefix to cap for reducing source skew (set empty to disable).",
+        default="raw.githubusercontent.com,phishing.army",
+        help="Comma-separated source prefixes to cap for reducing source skew (set empty to disable).",
     )
     ap.add_argument(
         "--ood_cap_source_ratio",
@@ -955,6 +955,9 @@ def main():
     args.ood_min_non_tail_count = max(0, args.ood_min_non_tail_count)
     args.ood_max_tail_ratio = max(0.0, min(1.0, args.ood_max_tail_ratio))
     args.ood_cap_source_ratio = max(0.0, min(1.0, args.ood_cap_source_ratio))
+    cap_source_prefixes = [
+        s.strip() for s in str(args.ood_cap_source).split(",") if str(s).strip()
+    ]
     os.makedirs(args.outdir, exist_ok=True)
     os.makedirs(args.cache, exist_ok=True)
 
@@ -1106,27 +1109,38 @@ def main():
     df_non_tail = df_non_tail[~df_non_tail["domain"].isin(protected_domains)].copy()
     df_non_tail = df_non_tail.drop_duplicates(subset=["domain"], keep="first")
 
-    capped_overflow = df_non_tail.head(0).copy()
-    if args.ood_cap_source:
+    capped_overflow_parts = []
+    if cap_source_prefixes:
         cap_from_ratio = int(args.ood * args.ood_cap_source_ratio)
         cap_candidates = [cap_from_ratio]
         if args.ood_cap_source_count >= 0:
             cap_candidates.append(args.ood_cap_source_count)
         source_cap = min(cap_candidates) if cap_candidates else -1
-        df_non_tail, capped_overflow = split_source_cap(
-            df_non_tail,
-            source_prefix=args.ood_cap_source,
-            max_count=source_cap,
-            seed=args.seed,
-        )
-        if args.enforce_ood_mix and source_cap >= 0:
-            capped_now = int(
-                df_non_tail["source"].astype(str).str.lower().str.startswith(args.ood_cap_source.lower()).sum()
+
+        for src_prefix in cap_source_prefixes:
+            df_non_tail, one_overflow = split_source_cap(
+                df_non_tail,
+                source_prefix=src_prefix,
+                max_count=source_cap,
+                seed=args.seed,
             )
-            if capped_now > source_cap:
-                raise RuntimeError(
-                    f"[WARN] Source cap not satisfied for {args.ood_cap_source}: got={capped_now:,}, cap={source_cap:,}"
+            if len(one_overflow) > 0:
+                capped_overflow_parts.append(one_overflow)
+
+            if args.enforce_ood_mix and source_cap >= 0:
+                capped_now = int(
+                    df_non_tail["source"].astype(str).str.lower().str.startswith(src_prefix.lower()).sum()
                 )
+                if capped_now > source_cap:
+                    raise RuntimeError(
+                        f"[WARN] Source cap not satisfied for {src_prefix}: got={capped_now:,}, cap={source_cap:,}"
+                    )
+
+    capped_overflow = (
+        pd.concat(capped_overflow_parts, ignore_index=True)
+        if capped_overflow_parts
+        else df_non_tail.head(0).copy()
+    )
 
     prefer_non_tail = max(int(args.ood * args.ood_min_non_tail_ratio), args.ood_min_non_tail_count)
     prefer_non_tail = min(args.ood, max(0, prefer_non_tail))
