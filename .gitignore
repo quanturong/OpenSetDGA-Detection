@@ -32,13 +32,6 @@ Thumbs.db
 *.tmp
 *.bak
 
-# Project data artifacts
-# Generated datasets per run
-dataset_out/
-
-# Downloaded / cached external data and crawler caches
-dataset_cache/
-.tldextract_cache/
 
 # Optional local env vars
 .env
