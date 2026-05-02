@@ -838,6 +838,77 @@ def sample_exact(df: pd.DataFrame, n: int, seed: int, name: str, strict: bool = 
     return df.copy()
 
 
+def profile_dataframe(df: pd.DataFrame, name: str) -> Dict:
+    out: Dict = {
+        "name": name,
+        "rows": int(len(df)),
+        "columns": list(df.columns),
+    }
+
+    if len(df) == 0:
+        out.update({
+            "null_ratio_by_column": {},
+            "duplicate_rows": 0,
+            "duplicate_domains": 0,
+            "label_balance": {},
+            "class_label_balance": {},
+            "source_balance": {},
+            "family_top10": {},
+            "domain_length": {},
+        })
+        return out
+
+    null_ratio = (df.isna().mean()).round(6).to_dict()
+    out["null_ratio_by_column"] = {str(k): float(v) for k, v in null_ratio.items()}
+    out["duplicate_rows"] = int(df.duplicated().sum())
+
+    if "domain" in df.columns:
+        out["duplicate_domains"] = int(df["domain"].duplicated().sum())
+        dlen = df["domain"].astype(str).map(len)
+        q1 = float(dlen.quantile(0.25))
+        q3 = float(dlen.quantile(0.75))
+        iqr = max(0.0, q3 - q1)
+        low = q1 - 1.5 * iqr
+        high = q3 + 1.5 * iqr
+        outliers = int(((dlen < low) | (dlen > high)).sum())
+        out["domain_length"] = {
+            "min": int(dlen.min()),
+            "max": int(dlen.max()),
+            "mean": float(round(float(dlen.mean()), 4)),
+            "median": float(dlen.median()),
+            "q1": q1,
+            "q3": q3,
+            "iqr": iqr,
+            "outlier_count_iqr": outliers,
+            "outlier_ratio_iqr": float(round(outliers / max(1, len(dlen)), 6)),
+        }
+    else:
+        out["duplicate_domains"] = 0
+        out["domain_length"] = {}
+
+    if "label" in df.columns:
+        out["label_balance"] = {str(k): int(v) for k, v in df["label"].value_counts().to_dict().items()}
+    else:
+        out["label_balance"] = {}
+
+    if "class_label" in df.columns:
+        out["class_label_balance"] = {str(k): int(v) for k, v in df["class_label"].value_counts().to_dict().items()}
+    else:
+        out["class_label_balance"] = {}
+
+    if "source" in df.columns:
+        out["source_balance"] = {str(k): int(v) for k, v in df["source"].value_counts().to_dict().items()}
+    else:
+        out["source_balance"] = {}
+
+    if "family" in df.columns:
+        out["family_top10"] = {str(k): int(v) for k, v in df["family"].value_counts().head(10).to_dict().items()}
+    else:
+        out["family_top10"] = {}
+
+    return out
+
+
 def dedupe_dga_by_domain(df_dga: pd.DataFrame) -> pd.DataFrame:
     if len(df_dga) == 0:
         return df_dga.copy()
@@ -1244,6 +1315,29 @@ def main():
     save(df_unknown, "test_unknown_family.csv", "unknown_family")
     save(df_unknown_ood, "test_unknown_ood.csv", "unknown_ood")
     save(df_unknown_ood, "test_ood.csv", "unknown_ood")
+
+    known_all = pd.concat([train, val, test_known], ignore_index=True)
+    quality_report = {
+        "run_outdir": run_outdir,
+        "requested": {
+            "benign": int(args.benign),
+            "known_dga": int(args.known_dga),
+            "unknown_family": int(args.unknown_family),
+            "unknown_ood": int(args.ood),
+        },
+        "profiles": {
+            "known_train": profile_dataframe(train, "known_train"),
+            "known_val": profile_dataframe(val, "known_val"),
+            "known_test": profile_dataframe(test_known, "known_test"),
+            "known_all": profile_dataframe(known_all, "known_all"),
+            "unknown_family": profile_dataframe(df_unknown, "unknown_family"),
+            "unknown_ood": profile_dataframe(df_unknown_ood, "unknown_ood"),
+        },
+    }
+    qpath = os.path.join(run_outdir, "quality_report.json")
+    with open(qpath, "w", encoding="utf-8") as f:
+        json.dump(quality_report, f, ensure_ascii=False, indent=2)
+    print(f"[OK] quality_report.json: {qpath}")
 
     print("\nOOD source breakdown:")
     if len(df_unknown_ood) == 0:

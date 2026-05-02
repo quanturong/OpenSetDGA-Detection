@@ -36,3 +36,13 @@ Thumbs.db
 # Optional local env vars
 .env
 .env.*
+
+# Build outputs
+dataset_out/
+dataset_cache/
+baseline_out/
+_feature_cache/
+.tldextract_cache/
+
+*.md
+*.pdf
