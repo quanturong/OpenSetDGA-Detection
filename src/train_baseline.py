@@ -32,9 +32,6 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "notebooks"))
 from features import FEATURE_NAMES, extract_features_batch
 
 # ── paths ───────────────────────────────────────────────────────────────────

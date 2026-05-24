@@ -30,9 +30,6 @@ from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "notebooks"))
 from features import FEATURE_NAMES, extract_features_batch
 from ood_utils import ood_metrics, print_ood_metrics
 

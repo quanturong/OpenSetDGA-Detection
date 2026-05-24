@@ -1,6 +1,6 @@
 ﻿"""
-plot_results.py â€” Trá»±c quan hÃ³a káº¿t quáº£ thá»±c nghiá»‡m Open-Set DGA Detection
-Sinh 3 biá»ƒu Ä‘á»“ + 1 báº£ng tá»•ng há»£p vÃ o thÆ° má»¥c figures/
+plot_results.py - Trực quan hóa kết quả thực nghiệm Open-Set DGA Detection
+Sinh 6 biểu đồ vào thư mục figures/
 """
 
 import os
@@ -11,11 +11,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
+import pandas as pd
 
 OUT_DIR = "figures"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-# â”€â”€ style â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── style
 plt.rcParams.update({
     "font.family": "DejaVu Sans",
     "axes.spines.top": False,
@@ -31,9 +32,9 @@ GRAY   = "#6B7280"
 GREEN  = "#16A34A"
 RED    = "#DC2626"
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Figure 1 â€” Classification accuracy (MC-Acc / Binary AUC)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 1 - Classification accuracy (MC-Acc / Binary AUC)
+# ══════════════════════════════════════════════════════════════════════════════
 models   = ["20-class\nLGBM", "Char-CNN", "BiLSTM"]
 mc_acc   = [0.654,  0.926,  0.935]
 bin_auc  = [0.946,  0.995,  0.996]
@@ -45,7 +46,6 @@ w = 0.35
 bars1 = ax.bar(x - w/2, mc_acc, w, label="MC-Accuracy", color=BLUE,   zorder=3)
 bars2 = ax.bar(x + w/2, bin_auc, w, label="Binary AUC",  color=ORANGE, zorder=3)
 
-# annotate
 for bar, val in zip(bars1, mc_acc):
     ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.008,
             f"{val:.3f}", ha="center", va="bottom", fontsize=9, color=BLUE, fontweight="bold")
@@ -58,25 +58,20 @@ ax.set_xticks(x)
 ax.set_xticklabels(models, fontsize=11)
 ax.set_ylim(0, 1.08)
 ax.set_ylabel("Score", fontsize=11)
-ax.set_title("Cháº¥t lÆ°á»£ng phÃ¢n loáº¡i (ID â€” test_known)", fontsize=13, fontweight="bold", pad=12)
+ax.set_title("Chat luong phan loai (ID - test_known)", fontsize=13, fontweight="bold", pad=12)
 ax.legend(fontsize=10)
 
-# highlight BiLSTM
 ax.axvspan(x[-1] - 0.5, x[-1] + 0.5, alpha=0.06, color=GREEN, zorder=0)
-ax.text(x[-1], 1.04, "â˜… Best", ha="center", fontsize=10, color=GREEN, fontweight="bold")
+ax.text(x[-1], 1.04, "Best", ha="center", fontsize=10, color=GREEN, fontweight="bold")
 
 fig.tight_layout()
 fig.savefig(f"{OUT_DIR}/fig1_classification.png", dpi=150)
 plt.close(fig)
-print(f"[âœ“] {OUT_DIR}/fig1_classification.png")
+print(f"[OK] {OUT_DIR}/fig1_classification.png")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Figure 2 â€” OOD unknown_family: chá»‰ best + 2 baseline Ä‘áº¡i diá»‡n + insight
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Giá»¯ láº¡i:
-#   LGBM MSP   â†’ baseline ML cá»• Ä‘iá»ƒn
-#   BiLSTM MSP â†’ baseline neural (Ä‘á»ƒ tháº¥y Energy >> MSP)
-#   BiLSTM Energy â†’ BEST
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 2 - OOD unknown_family
+# ══════════════════════════════════════════════════════════════════════════════
 uf_labels = ["LGBM\nMSP", "Char-CNN\nMSP", "BiLSTM\nMSP", "BiLSTM\nEnergy\n(best)"]
 uf_auroc  = [0.550,       0.670,           0.661,           0.836               ]
 uf_colors = [GRAY,        GRAY,            GRAY,            GREEN               ]
@@ -91,7 +86,7 @@ for bar, val, color in zip(bars, uf_auroc, uf_colors):
 
 ax.set_xlim(0.4, 0.93)
 ax.set_xlabel("AUROC", fontsize=11)
-ax.set_title("OOD â€” unknown_family (há» DGA chÆ°a tháº¥y)",
+ax.set_title("OOD - unknown_family (ho DGA chua thay)",
              fontsize=12, fontweight="bold", pad=10)
 ax.axvline(0.5, color=RED, linestyle="--", alpha=0.4, linewidth=1.2, label="Random (0.5)")
 
@@ -101,15 +96,11 @@ ax.legend(fontsize=9, loc="lower right")
 fig.tight_layout()
 fig.savefig(f"{OUT_DIR}/fig2_ood_unknown_family.png", dpi=150)
 plt.close(fig)
-print(f"[âœ“] {OUT_DIR}/fig2_ood_unknown_family.png")
+print(f"[OK] {OUT_DIR}/fig2_ood_unknown_family.png")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Figure 3 â€” OOD unknown_ood: chá»‰ best + 2 baseline Ä‘áº¡i diá»‡n + insight
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Giá»¯ láº¡i:
-#   LGBM MSP      â†’ baseline ML cá»• Ä‘iá»ƒn
-#   BiLSTM Energy â†’ baseline neural tá»‘t nháº¥t trÆ°á»›c KNN (Ä‘á»ƒ tháº¥y KNN >> Energy á»Ÿ split nÃ y)
-#   BiLSTM KNN k=5 â†’ BEST
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 3 - OOD unknown_ood
+# ══════════════════════════════════════════════════════════════════════════════
 oo_labels = ["LGBM\nMSP", "BiLSTM\nEnergy", "Char-CNN\nKNN k=5", "BiLSTM\nKNN k=5\n(best)"]
 oo_auroc  = [0.529,       0.571,           0.680,              0.707              ]
 oo_colors = [GRAY,        GRAY,            BLUE,               GREEN              ]
@@ -124,7 +115,7 @@ for bar, val, color in zip(bars, oo_auroc, oo_colors):
 
 ax.set_xlim(0.35, 0.78)
 ax.set_xlabel("AUROC", fontsize=11)
-ax.set_title("OOD â€” unknown_ood (domain legitimate)",
+ax.set_title("OOD - unknown_ood (domain legitimate)",
              fontsize=12, fontweight="bold", pad=10)
 ax.axvline(0.5, color=RED, linestyle="--", alpha=0.4, linewidth=1.2, label="Random (0.5)")
 
@@ -134,12 +125,12 @@ ax.legend(fontsize=9, loc="lower right")
 fig.tight_layout()
 fig.savefig(f"{OUT_DIR}/fig3_ood_unknown_ood.png", dpi=150)
 plt.close(fig)
-print(f"[âœ“] {OUT_DIR}/fig3_ood_unknown_ood.png")
+print(f"[OK] {OUT_DIR}/fig3_ood_unknown_ood.png")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Figure 4 â€” so sÃ¡nh Energy vs KNN trÃªn hai split (insight chÃ­nh)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-splits  = ["unknown_family\n(há» DGA má»›i)", "unknown_ood\n(domain legitimate)"]
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 4 - So sanh Energy vs KNN tren hai split
+# ══════════════════════════════════════════════════════════════════════════════
+splits  = ["unknown_family\n(ho DGA moi)", "unknown_ood\n(domain legitimate)"]
 energy  = [0.836, 0.571]
 knn     = [0.647, 0.707]
 
@@ -161,28 +152,30 @@ ax.set_xticks(x)
 ax.set_xticklabels(splits, fontsize=11)
 ax.set_ylim(0.4, 0.95)
 ax.set_ylabel("AUROC", fontsize=11)
-ax.set_title("Energy vs KNN â€” BiLSTM",
+ax.set_title("Energy vs KNN - BiLSTM",
              fontsize=12, fontweight="bold", pad=12)
 ax.legend(fontsize=10)
 ax.axhline(0.5, color=RED, linestyle="--", alpha=0.4, linewidth=1)
 
-
 fig.tight_layout()
 fig.savefig(f"{OUT_DIR}/fig4_energy_vs_knn.png", dpi=150)
 plt.close(fig)
-print(f"[âœ“] {OUT_DIR}/fig4_energy_vs_knn.png")
+print(f"[OK] {OUT_DIR}/fig4_energy_vs_knn.png")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Figure 5 â€” PhÃ¢n phá»‘i OOD score (Confidence Score Distribution)
-#            BiLSTM + Energy  (best scorer cho unknown_family)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-import pandas as pd
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 5 - Phan phoi OOD score (Confidence Score Distribution)
+#            BiLSTM + Energy
+# ══════════════════════════════════════════════════════════════════════════════
+import glob
 
-_bilstm_dir = "baseline_out/bilstm_20260414_222503"
+# Tim bilstm dir tu dong
+_bilstm_dirs = sorted(glob.glob("baseline_out/bilstm_*/"))
+_bilstm_dir = _bilstm_dirs[-1].rstrip("/") if _bilstm_dirs else "baseline_out/bilstm_20260414_222503"
+
 _score_files = {
-    "known (ID)":          f"{_bilstm_dir}/scores_energy_known.csv",
-    "unknown family\n(DGA má»›i)": f"{_bilstm_dir}/scores_energy_unknown_family.csv",
-    "unknown OOD\n(legitimate)": f"{_bilstm_dir}/scores_energy_unknown_ood.csv",
+    "known (ID)":               f"{_bilstm_dir}/scores_energy_known.csv",
+    "unknown family (DGA moi)": f"{_bilstm_dir}/scores_energy_unknown_family.csv",
+    "unknown OOD (legitimate)": f"{_bilstm_dir}/scores_energy_unknown_ood.csv",
 }
 
 _loaded = {}
@@ -195,15 +188,14 @@ for _label, _path in _score_files.items():
 
 if len(_loaded) >= 2:
     _colors = {
-        "known (ID)":          BLUE,
-        "unknown family\n(DGA má»›i)": ORANGE,
-        "unknown OOD\n(legitimate)": GRAY,
+        "known (ID)":               BLUE,
+        "unknown family (DGA moi)": ORANGE,
+        "unknown OOD (legitimate)": GRAY,
     }
-    _SAMPLE = 10_000  # subsample for speed
+    _SAMPLE = 10_000
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
 
-    # --- panel A: histogram (overlaid) ---
     ax = axes[0]
     rng = np.random.default_rng(42)
     for _label, _scores in _loaded.items():
@@ -212,12 +204,11 @@ if len(_loaded) >= 2:
                 color=_colors.get(_label, GRAY), label=_label)
     ax.set_xlabel("OOD Score (Energy)", fontsize=11)
     ax.set_ylabel("Density", fontsize=11)
-    ax.set_title("PhÃ¢n phá»‘i OOD Score â€” BiLSTM Energy", fontsize=12, fontweight="bold")
+    ax.set_title("Phan phoi OOD Score - BiLSTM Energy", fontsize=12, fontweight="bold")
     ax.legend(fontsize=9)
 
-    # --- panel B: box plot ---
     ax2 = axes[1]
-    _box_data  = list(_loaded.values())
+    _box_data   = list(_loaded.values())
     _box_labels = list(_loaded.keys())
     _box_colors = [_colors.get(l, GRAY) for l in _box_labels]
 
@@ -232,7 +223,7 @@ if len(_loaded) >= 2:
     ax2.set_xticks(range(1, len(_box_labels) + 1))
     ax2.set_xticklabels(_box_labels, fontsize=9)
     ax2.set_ylabel("OOD Score (Energy)", fontsize=11)
-    ax2.set_title("Box Plot â€” phÃ¢n tÃ¡ch ID vs OOD", fontsize=12, fontweight="bold")
+    ax2.set_title("Box Plot - phan tach ID vs OOD", fontsize=12, fontweight="bold")
 
     fig.suptitle(
         "Confidence Score Distribution: in-distribution vs OOD (BiLSTM + Energy)",
@@ -241,27 +232,25 @@ if len(_loaded) >= 2:
     fig.tight_layout()
     fig.savefig(f"{OUT_DIR}/fig5_score_distribution.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"[âœ“] {OUT_DIR}/fig5_score_distribution.png")
+    print(f"[OK] {OUT_DIR}/fig5_score_distribution.png")
 else:
-    print("  [skip] fig5: khÃ´ng Ä‘á»§ score CSV, cháº¡y train_bilstm.py trÆ°á»›c")
+    print("  [skip] fig5: khong du score CSV, chay train_bilstm.py truoc")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Figure 6 â€” Benign overfit analysis: per-source OOD score breakdown
-#            Chá»©ng minh tranco_tail â‰ˆ train benign â†’ model khÃ´ng phÃ¢n biá»‡t Ä‘Æ°á»£c
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-_bilstm_dir = "baseline_out/bilstm_20260414_222503"
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 6 - Benign overfit analysis: per-source OOD score breakdown
+# ══════════════════════════════════════════════════════════════════════════════
+_bilstm_dirs = sorted(glob.glob("baseline_out/bilstm_*/"))
+_bilstm_dir  = _bilstm_dirs[-1].rstrip("/") if _bilstm_dirs else "baseline_out/bilstm_20260414_222503"
 _dataset_dir = "data/processed"
 
 try:
     _ood_meta  = pd.read_csv(f"{_dataset_dir}/unknown_ood/test_unknown_ood.csv")
     _ood_score = pd.read_csv(f"{_bilstm_dir}/scores_energy_unknown_ood.csv")
-    # scores_energy_known.csv = ID (known) test split scores — use directly as reference
     _known_sc  = pd.read_csv(f"{_bilstm_dir}/scores_energy_known.csv")
 
     _ood_df = _ood_meta.merge(
         _ood_score.rename(columns={"ood_score": "energy"}), on="domain", how="inner"
     )
-    # ID reference: all known test scores (benign + DGA — reflects what model sees as in-distribution)
     _id_scores = _known_sc["ood_score"].dropna().values
 
     _src_rename = {
@@ -286,7 +275,6 @@ try:
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # --- panel A: median energy by source ---
     ax = axes[0]
     _bar_colors = [
         ORANGE if src == "tranco_tail" else (BLUE if src == "crt.sh" else GRAY)
@@ -313,12 +301,11 @@ try:
                     fontsize=8, color=ORANGE,
                     arrowprops=dict(arrowstyle="->", color=ORANGE, lw=1.3))
 
-    # --- panel B: histogram tranco_tail vs known vs 360netlab ---
     ax2 = axes[1]
     _rng = np.random.default_rng(42)
 
     _groups = {
-        "known (ID — test_known)":   (_id_scores,  GREEN),
+        "known (ID - test_known)":   (_id_scores,  GREEN),
         "tranco_tail (OOD legit)":   (_ood_df[_ood_df["src_short"] == "tranco_tail"]["energy"].dropna().values, ORANGE),
         "360netlab (OOD malicious)": (_ood_df[_ood_df["src_short"] == "360netlab"]["energy"].dropna().values, RED),
     }
@@ -334,7 +321,7 @@ try:
                   "(tranco_tail overlaps with known ID -> hard to detect)", fontsize=10, fontweight="bold")
     ax2.legend(fontsize=9)
 
-    fig.suptitle("Benign Overfit Analysis — Model cannot distinguish tranco_tail from known benign",
+    fig.suptitle("Benign Overfit Analysis - Model cannot distinguish tranco_tail from known benign",
                  fontsize=12, fontweight="bold", y=1.01)
     fig.tight_layout()
     fig.savefig(f"{OUT_DIR}/fig6_benign_overfit.png", dpi=150, bbox_inches="tight")
