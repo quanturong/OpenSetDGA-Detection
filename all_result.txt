@@ -1,0 +1,377 @@
+================================================================================
+  OpenSetDGA-Detection — KẾT QUẢ THỰC NGHIỆM TỔNG HỢP
+  Ngày chạy: 2026-05-22 ~ 2026-05-23
+================================================================================
+
+Ghi chú về metric:
+  AUROC    ↑  (cao hơn = tốt hơn, 0.5 = random, 1.0 = hoàn hảo)
+  AUPR     ↑  (Average Precision, OOD là positive class)
+  FPR@95   ↓  (False Positive Rate khi True Positive Rate = 95%, thấp = tốt)
+
+Hai tập đánh giá OOD:
+  unknown_family  → DGA từ họ HOÀN TOÀN MỚI (open-set DGA, không thấy trong train)
+  unknown_ood     → Domain thực từ blocklist/phishing (real-world OOD)
+
+Tất cả model huấn luyện với 20 lớp: benign + 19 họ DGA đã biết (trừ Binary LightGBM: 2 lớp).
+
+================================================================================
+  MỤC LỤC
+================================================================================
+  A. Giải thích thư mục kết quả
+  B. Bảng 1 — Hiệu năng Phân loại (test_known, in-distribution)
+  C. Bảng 2 — OOD: Unknown Family (open-set DGA)
+     C1. Phương pháp cơ bản (train_*.py)
+     C2. Phương pháp nâng cao (eval_extra_ood.py)
+     C3. Hybrid LogReg (hybrid_scorer.py)
+  D. Bảng 3 — OOD: Unknown OOD (real-world blocklist/phishing)
+     D1. Phương pháp cơ bản (train_*.py)
+     D2. Phương pháp nâng cao (eval_extra_ood.py)
+     D3. Hybrid LogReg (hybrid_scorer.py)
+  E. Tóm tắt — Phương pháp tốt nhất theo từng tập
+  F. Ghi chú cho bảng LaTeX
+
+================================================================================
+  A. GIẢI THÍCH THƯ MỤC KẾT QUẢ
+================================================================================
+
+baseline_out/run_20260522_153239/
+  → Binary LightGBM (benign vs. DGA, 2 lớp)
+  → Scorer: MSP, Energy
+  → File: model.txt, feature_importance.csv, results.json, scores_*.csv
+
+baseline_out/multiclass_20260522_155715/
+  → Multiclass LightGBM (20 lớp: benign + 19 họ DGA)
+  → Scorer: MSP, Energy, KNN (k=5, subsample=50k trên feature space 35-dim)
+  → File: model.txt, feature_importance.csv, results.json, scores_*.csv
+
+baseline_out/neural_20260522_161814/
+  → CNN ký tự (Embedding → Conv1D×3 → GlobalMaxPool → Dense128 → Dense20)
+  → Scorer: MSP, Mahalanobis (class-conditional Gaussian trên penultimate)
+  → File: model.pt, results.json, scores_*.csv
+
+baseline_out/bilstm_20260522_162556/
+  → BiLSTM ký tự (Embedding → BiLSTM(128,2layers) → Dense128 → Dense20)
+  → Scorer: MSP, Energy, Mahalanobis
+  → File: model.pt, results.json, scores_*.csv
+
+baseline_out/transformer_20260522_163620/
+  → Transformer ký tự ([CLS]+Embed64+PosEnc → TransformerEncoder(nhead=4,layers=2) → Dense128 → Dense20)
+  → Scorer: MSP, Energy, Mahalanobis
+  → File: model.pt, results.json, scores_*.csv
+
+baseline_out/extra_ood_20260523_115115/
+  → Thực nghiệm bổ sung trên CNN và BiLSTM đã lưu
+  → Scorer: CNN/BiLSTM + {Energy (CNN), ODIN (T=1000, ε∈{0.0,0.001,0.005}),
+             KNN (k∈{5,20,50} trên penultimate features),
+             Hybrid-inline (Energy+KNN linear sum)}
+  → File: results.json, scores_*.csv
+
+baseline_out/hybrid_20260523_114954/
+  → Hybrid Logistic Regression: input = [bilstm_energy_score, lgbm_knn_score]
+  → Huấn luyện trên: 40k test_known (ID) + 50k unknown_ood (50% làm calibration)
+  → Đánh giá final: unknown_family (full), unknown_ood holdout (50% còn lại)
+  → Hệ số: coef_energy=0.8495, coef_knn=0.8669, intercept=0.7708
+  → File: results.json, scores_*.csv
+
+================================================================================
+  B. BẢNG 1 — HIỆU NĂNG PHÂN LOẠI (test_known, in-distribution)
+================================================================================
+
+  Acc(bin): Binary accuracy (benign vs. DGA)
+  F1(bin):  Binary F1-score
+  AUC(cls): ROC-AUC phân loại (không phải OOD)
+  Acc(mc):  Multiclass accuracy (phân loại đúng họ DGA)
+
++------------------------------+----------+---------+----------+---------+
+| Model                        | Acc(bin) | F1(bin) | AUC(cls) | Acc(mc) |
++------------------------------+----------+---------+----------+---------+
+| Binary LightGBM              |   0.8743 |  0.8692 |   0.9490 |    N/A  |
+| Multiclass LightGBM          |   0.7320 |  0.7855 |   0.9458 |  0.6535 |
+| CNN                          |   0.9693 |  0.9694 |   0.9958 |  0.9268 |
+| BiLSTM                       |   0.9764 |  0.9764 |   0.9969 |  0.9418 |
+| Transformer                  |   0.9325 |  0.9331 |   0.9827 |  0.8905 |
++------------------------------+----------+---------+----------+---------+
+
+Nhận xét: BiLSTM đạt hiệu năng phân loại cao nhất. Multiclass LightGBM yếu hơn
+các model neural do không gian feature thấp hơn và overlap giữa các họ DGA.
+
+================================================================================
+  C. BẢNG 2 — OOD: UNKNOWN FAMILY (open-set DGA, họ chưa thấy trong train)
+================================================================================
+
+--- C1. Phương pháp cơ bản (từ train_*.py) ---
+
++------------------------------+-------------+---------+---------+---------+
+| Model + Scorer               | Nguồn       |  AUROC↑ |  AUPR↑  | FPR@95↓ |
++------------------------------+-------------+---------+---------+---------+
+| Binary LightGBM  + MSP       | train_base  |  0.4167 |  0.4865 |  0.9529 |
+| Binary LightGBM  + Energy    | train_base  |  0.4997 |  0.9336 |  1.0000 |
+| Multiclass LGBM  + MSP       | train_multi |  0.5499 |  0.5926 |  0.8524 |
+| Multiclass LGBM  + Energy    | train_multi |  0.4936 |  0.5557 |  0.9913 |
+| Multiclass LGBM  + KNN       | train_multi |  0.5117 |  0.6256 |  1.0000 |
+| CNN              + MSP       | train_nn    |  0.7139 |  0.7370 |  0.7875 |
+| CNN              + Mahalanob.| train_nn    |  0.5440 |  0.6167 |  0.9346 |
+| BiLSTM           + MSP       | train_bilsm |  0.7119 |  0.7275 |  0.7689 |
+| BiLSTM           + Energy    | train_bilsm |  0.8706 |  0.8710 |  0.4074 |
+| BiLSTM           + Mahalanob.| train_bilsm |  0.5826 |  0.6553 |  0.8953 |
+| Transformer      + MSP       | train_trans |  0.5648 |  0.6270 |  0.8985 |
+| Transformer      + Energy    | train_trans |  0.7355 |  0.7454 |  0.7443 |
+| Transformer      + Mahalanob.| train_trans |  0.5329 |  0.6120 |  0.9690 |
++------------------------------+-------------+---------+---------+---------+
+
+--- C2. Phương pháp nâng cao (từ eval_extra_ood.py, extra_ood_20260523_115115) ---
+
+  [CNN]
++---------------------------------------+--------+---------+---------+
+| Scorer                                | AUROC↑ |  AUPR↑  | FPR@95↓ |
++---------------------------------------+--------+---------+---------+
+| CNN + Energy                          | 0.8002 |  0.8068 |  0.6529 |
+| CNN + ODIN (T=1000, ε=0.000)          | 0.7762 |  0.8011 |  0.8183 |
+| CNN + ODIN (T=1000, ε=0.001)          | 0.7765 |  0.8014 |  0.8177 |
+| CNN + ODIN (T=1000, ε=0.005) [best]   | 0.7776 |  0.8022 |  0.8166 |
+| CNN + KNN  (k=5)  [best k]            | 0.5653 |  0.6683 |  0.9281 |
+| CNN + KNN  (k=20)                     | 0.5613 |  0.6653 |  0.9354 |
+| CNN + KNN  (k=50)                     | 0.5596 |  0.6632 |  0.9412 |
+| CNN + Hybrid Energy+KNN (k=5)  [best] | 0.7964 |  0.8176 |  0.5649 |
+| CNN + Hybrid Energy+KNN (k=20)        | 0.7948 |  0.8170 |  0.5696 |
+| CNN + Hybrid Energy+KNN (k=50)        | 0.7938 |  0.8165 |  0.5750 |
++---------------------------------------+--------+---------+---------+
+
+  [BiLSTM]
++------------------------------------------+--------+---------+---------+
+| Scorer                                   | AUROC↑ |  AUPR↑  | FPR@95↓ |
++------------------------------------------+--------+---------+---------+
+| BiLSTM + ODIN (T=1000, ε=0.000)          | 0.7962 |  0.8023 |  0.6244 |
+| BiLSTM + ODIN (T=1000, ε=0.001)          | 0.7975 |  0.8032 |  0.6221 |
+| BiLSTM + ODIN (T=1000, ε=0.005) [best]   | 0.8021 |  0.8057 |  0.6125 |
+| BiLSTM + KNN  (k=5)  [best k]            | 0.6110 |  0.6748 |  0.8845 |
+| BiLSTM + KNN  (k=20)                     | 0.6085 |  0.6716 |  0.8877 |
+| BiLSTM + KNN  (k=50)                     | 0.6113 |  0.6726 |  0.8894 |
+| BiLSTM + Hybrid Energy+KNN (k=5)         | 0.8140 |  0.8216 |  0.5149 |
+| BiLSTM + Hybrid Energy+KNN (k=20)        | 0.8133 |  0.8211 |  0.5190 |
+| BiLSTM + Hybrid Energy+KNN (k=50) [best] | 0.8153 |  0.8236 |  0.5285 |
++------------------------------------------+--------+---------+---------+
+
+--- C3. Hybrid Logistic Regression (từ hybrid_scorer.py) ---
+
++--------------------------------------------------------+--------+--------+---------+
+| Scorer                                                 | AUROC↑ |  AUPR↑ | FPR@95↓ |
++--------------------------------------------------------+--------+--------+---------+
+| LogReg Hybrid (BiLSTM Energy + LGBM KNN) [BEST TOTAL] | 0.8851 | 0.8082 |  0.3911 |
++--------------------------------------------------------+--------+--------+---------+
+
+================================================================================
+  D. BẢNG 3 — OOD: UNKNOWN OOD (real-world: blocklist, phishing, CRT.sh)
+================================================================================
+
+--- D1. Phương pháp cơ bản (từ train_*.py) ---
+
++------------------------------+-------------+---------+---------+---------+
+| Model + Scorer               | Nguồn       |  AUROC↑ |  AUPR↑  | FPR@95↓ |
++------------------------------+-------------+---------+---------+---------+
+| Binary LightGBM  + MSP       | train_base  |  0.5342 |  0.7333 |  0.9739 |
+| Binary LightGBM  + Energy    | train_base  |  0.5017 |  0.8956 |  1.0000 |
+| Multiclass LGBM  + MSP       | train_multi |  0.5286 |  0.7323 |  0.9198 |
+| Multiclass LGBM  + Energy    | train_multi |  0.4985 |  0.7189 |  0.9913 |
+| Multiclass LGBM  + KNN       | train_multi |  0.5708 |  0.7887 |  0.9634 |
+| CNN              + MSP       | train_nn    |  0.4905 |  0.7085 |  0.9684 |
+| CNN              + Mahalanob.| train_nn    |  0.5266 |  0.7444 |  0.9348 |
+| BiLSTM           + MSP       | train_bilsm |  0.4805 |  0.6999 |  0.9769 |
+| BiLSTM           + Energy    | train_bilsm |  0.5784 |  0.7648 |  0.8550 |
+| BiLSTM           + Mahalanob.| train_bilsm |  0.5606 |  0.7508 |  0.9097 |
+| Transformer      + MSP       | train_trans |  0.5396 |  0.7279 |  0.9288 |
+| Transformer      + Energy    | train_trans |  0.5800 |  0.7678 |  0.8975 |
+| Transformer      + Mahalanob.| train_trans |  0.5008 |  0.7193 |  0.9516 |
++------------------------------+-------------+---------+---------+---------+
+
+--- D2. Phương pháp nâng cao (từ eval_extra_ood.py, extra_ood_20260523_115115) ---
+
+  [CNN]
++---------------------------------------+--------+---------+---------+
+| Scorer                                | AUROC↑ |  AUPR↑  | FPR@95↓ |
++---------------------------------------+--------+---------+---------+
+| CNN + Energy                          | 0.5391 |  0.7526 |  0.9624 |
+| CNN + ODIN (T=1000, ε=0.000)          | 0.5178 |  0.7362 |  0.9775 |
+| CNN + ODIN (T=1000, ε=0.001)          | 0.5176 |  0.7356 |  0.9775 |
+| CNN + ODIN (T=1000, ε=0.005)          | 0.5164 |  0.7328 |  0.9773 |
+| CNN + KNN  (k=5)  [best k]            | 0.6838 |  0.8423 |  0.8396 |
+| CNN + KNN  (k=20)                     | 0.6799 |  0.8394 |  0.8414 |
+| CNN + KNN  (k=50)                     | 0.6749 |  0.8361 |  0.8430 |
+| CNN + Hybrid Energy+KNN (k=5)  [best] | 0.6937 |  0.8442 |  0.7972 |
+| CNN + Hybrid Energy+KNN (k=20) [best] | 0.6937 |  0.8436 |  0.7911 |
+| CNN + Hybrid Energy+KNN (k=50)        | 0.6914 |  0.8420 |  0.7897 |
++---------------------------------------+--------+---------+---------+
+
+  [BiLSTM]
++------------------------------------------+--------+---------+---------+
+| Scorer                                   | AUROC↑ |  AUPR↑  | FPR@95↓ |
++------------------------------------------+--------+---------+---------+
+| BiLSTM + ODIN (T=1000, ε=0.000)          | 0.5492 |  0.7430 |  0.9030 |
+| BiLSTM + ODIN (T=1000, ε=0.001)          | 0.5485 |  0.7417 |  0.9025 |
+| BiLSTM + ODIN (T=1000, ε=0.005)          | 0.5451 |  0.7364 |  0.9014 |
+| BiLSTM + KNN  (k=5)  [best k]            | 0.7176 |  0.8530 |  0.6947 |
+| BiLSTM + KNN  (k=20)                     | 0.7094 |  0.8473 |  0.6965 |
+| BiLSTM + KNN  (k=50)                     | 0.7014 |  0.8413 |  0.7018 |
+| BiLSTM + Hybrid Energy+KNN (k=5)  [best] | 0.6921 |  0.8403 |  0.7300 |
+| BiLSTM + Hybrid Energy+KNN (k=20)        | 0.6846 |  0.8351 |  0.7347 |
+| BiLSTM + Hybrid Energy+KNN (k=50)        | 0.6773 |  0.8298 |  0.7403 |
++------------------------------------------+--------+---------+---------+
+
+--- D3. Hybrid Logistic Regression (từ hybrid_scorer.py) ---
+  [Chú ý: đánh giá trên 50% unknown_ood holdout — không phải toàn bộ 100k]
+
++----------------------------------------------------+--------+--------+---------+
+| Scorer                                             | AUROC↑ |  AUPR↑ | FPR@95↓ |
++----------------------------------------------------+--------+--------+---------+
+| LogReg Hybrid (BiLSTM Energy + LGBM KNN) [holdout]| 0.6324 | 0.6838 |  0.7996 |
++----------------------------------------------------+--------+--------+---------+
+
+================================================================================
+  E. TÓM TẮT — PHƯƠNG PHÁP TỐT NHẤT THEO TỪNG TẬP
+================================================================================
+
+--- Unknown Family (open-set DGA) — tìm model phát hiện họ DGA mới ---
+
+Rank | Model + Scorer                              | AUROC  | AUPR   | FPR@95
+-----|---------------------------------------------|--------|--------|-------
+  1  | LogReg Hybrid (BiLSTM-E + LGBM-KNN)         | 0.8851 | 0.8082 | 0.3911  ← BEST
+  2  | BiLSTM + Energy                             | 0.8706 | 0.8710 | 0.4074
+  3  | BiLSTM + Hybrid Energy+KNN(k=50) [inline]   | 0.8153 | 0.8236 | 0.5285
+  4  | BiLSTM + Hybrid Energy+KNN(k=5)  [inline]   | 0.8140 | 0.8216 | 0.5149
+  5  | BiLSTM + ODIN (ε=0.005)                     | 0.8021 | 0.8057 | 0.6125
+  6  | CNN + Energy                                | 0.8002 | 0.8068 | 0.6529
+  7  | BiLSTM + ODIN (ε=0.001)                     | 0.7975 | 0.8032 | 0.6221
+  8  | CNN + Hybrid Energy+KNN(k=5)                | 0.7964 | 0.8176 | 0.5649
+  9  | CNN + ODIN (ε=0.005)                        | 0.7776 | 0.8022 | 0.8166
+ 10  | Transformer + Energy                        | 0.7355 | 0.7454 | 0.7443
+
+--- Unknown OOD (real-world) — tìm model phát hiện domain phishing/blocklist ---
+
+Rank | Model + Scorer                              | AUROC  | AUPR   | FPR@95
+-----|---------------------------------------------|--------|--------|-------
+  1  | BiLSTM + KNN (k=5, neural penultimate)      | 0.7176 | 0.8530 | 0.6947  ← BEST
+  2  | BiLSTM + KNN (k=20)                         | 0.7094 | 0.8473 | 0.6965
+  3  | BiLSTM + KNN (k=50)                         | 0.7014 | 0.8413 | 0.7018
+  4  | CNN  + Hybrid Energy+KNN(k=5/20)            | 0.6937 | 0.8442 | 0.7972
+  5  | BiLSTM + Hybrid Energy+KNN(k=5)             | 0.6921 | 0.8403 | 0.7300
+  6  | CNN  + KNN (k=5)                            | 0.6838 | 0.8423 | 0.8396
+  7  | LogReg Hybrid [holdout only]                | 0.6324 | 0.6838 | 0.7996
+  8  | Transformer + Energy                        | 0.5800 | 0.7678 | 0.8975
+  9  | BiLSTM + Energy                             | 0.5784 | 0.7648 | 0.8550
+ 10  | Transformer + MSP                           | 0.5396 | 0.7279 | 0.9288
+
+================================================================================
+  F. GHI CHÚ CHO BẢNG LATEX
+================================================================================
+
+1. CẤU TRÚC BẢNG GỢI Ý:
+   - Bảng phân loại (Bảng 1): 5 dòng × 4 cột, so sánh acc/F1/AUC
+   - Bảng OOD chính (Bảng 2+3): chia theo split (unknown_family | unknown_ood)
+     mỗi dòng = 1 phương pháp, cột = AUROC | AUPR | FPR@95
+   - Dùng \midrule để phân nhóm theo model
+
+2. ĐỊNH DẠNG SỐ TRONG LATEX:
+   - Làm tròn 4 chữ số thập phân: 0.8706 → \num{0.8706} hoặc 87.06\%
+   - Tô đậm \textbf{} cho best trong mỗi cột
+   - Tô nghiêng \textit{} cho second-best
+
+3. CÁC PHƯƠNG PHÁP NÊN ĐƯA VÀO BẢNG CHÍNH (gợi ý lọc):
+   Tên gợi ý trong bảng    | Giá trị AUROC (unk.fam / unk.ood)
+   -------------------------|------------------------------------
+   LGBM-Binary + MSP        | 0.4167 / 0.5342
+   LGBM-Multi  + MSP        | 0.5499 / 0.5286
+   LGBM-Multi  + KNN        | 0.5117 / 0.5708
+   CNN + MSP                | 0.7139 / 0.4905
+   CNN + Energy             | 0.8002 / 0.5391
+   CNN + ODIN               | 0.7776 / 0.5164
+   CNN + KNN-neural         | 0.5653 / 0.6838
+   BiLSTM + MSP             | 0.7119 / 0.4805
+   BiLSTM + Energy          | 0.8706 / 0.5784
+   BiLSTM + ODIN            | 0.8021 / 0.5451
+   BiLSTM + KNN-neural      | 0.6110 / 0.7176
+   BiLSTM + Hybrid-inline   | 0.8153 / 0.6921
+   Transformer + Energy     | 0.7355 / 0.5800
+   Hybrid LogReg (proposed) | 0.8851 / 0.6324*
+   (* unk.ood = holdout 50k, không phải full 100k)
+
+4. LƯU Ý QUAN TRỌNG:
+   a) Kết quả Hybrid LogReg trên unknown_ood chỉ trên 50k holdout,
+      KHÔNG thể so sánh trực tiếp với các method khác đánh giá trên 100k.
+   b) Binary LightGBM Energy có AUPR=0.9336 trên unknown_family nhưng
+      AUROC=0.4997 — điều này xảy ra vì AUPR-out phụ thuộc vào tỷ lệ
+      OOD/ID trong tập, không phản ánh đúng khả năng phân biệt.
+   c) CNN Energy và BiLSTM Energy trong bảng C2/D2 được tính lại từ
+      logit thô bởi eval_extra_ood.py — kết quả có thể lệch nhẹ so với
+      nếu tính trực tiếp trong train_neural.py.
+
+================================================================================
+  RAW NUMBERS REFERENCE (đầy đủ, để tra cứu)
+================================================================================
+
+[Binary LightGBM — run_20260522_153239]
+  cls_val:            acc=0.87305,  f1=0.86805, auc=0.94778
+  cls_test_known:     acc=0.87433,  f1=0.86925, auc=0.94898
+  ood_msp_unk_fam:    auroc=0.41666, aupr=0.48647, fpr95=0.95290
+  ood_msp_unk_ood:    auroc=0.53417, aupr=0.73333, fpr95=0.97390
+  ood_energy_unk_fam: auroc=0.49967, aupr=0.93360, fpr95=1.00000
+  ood_energy_unk_ood: auroc=0.50171, aupr=0.89562, fpr95=1.00000
+
+[Multiclass LightGBM — multiclass_20260522_155715]
+  cls_val:            mc_acc=0.65223, bin_acc=0.72993, f1=0.78413, auc=0.94401
+  cls_test_known:     mc_acc=0.65353, bin_acc=0.73203, f1=0.78554, auc=0.94583
+  ood_msp_unk_fam:    auroc=0.54995, aupr=0.59262, fpr95=0.85235
+  ood_msp_unk_ood:    auroc=0.52855, aupr=0.73231, fpr95=0.91978
+  ood_energy_unk_fam: auroc=0.49361, aupr=0.55570, fpr95=0.99133
+  ood_energy_unk_ood: auroc=0.49846, aupr=0.71892, fpr95=0.99133
+  ood_knn_unk_fam:    auroc=0.51171, aupr=0.62562, fpr95=1.00000
+  ood_knn_unk_ood:    auroc=0.57085, aupr=0.78868, fpr95=0.96343
+
+[CNN — neural_20260522_161814]
+  cls_test_known:     mc_acc=0.92675, bin_acc=0.96925, f1=0.96936, auc=0.99581
+  ood_msp_unk_fam:    auroc=0.71395, aupr=0.73701, fpr95=0.78750
+  ood_msp_unk_ood:    auroc=0.49048, aupr=0.70853, fpr95=0.96838
+  ood_mahal_unk_fam:  auroc=0.54395, aupr=0.61667, fpr95=0.93460
+  ood_mahal_unk_ood:  auroc=0.52660, aupr=0.74442, fpr95=0.93480
+
+[BiLSTM — bilstm_20260522_162556]
+  cls_test_known:     mc_acc=0.94180, bin_acc=0.97640, f1=0.97637, auc=0.99686
+  ood_msp_unk_fam:    auroc=0.71186, aupr=0.72751, fpr95=0.76885
+  ood_msp_unk_ood:    auroc=0.48046, aupr=0.69990, fpr95=0.97685
+  ood_energy_unk_fam: auroc=0.87056, aupr=0.87101, fpr95=0.40738
+  ood_energy_unk_ood: auroc=0.57835, aupr=0.76476, fpr95=0.85498
+  ood_mahal_unk_fam:  auroc=0.58256, aupr=0.65529, fpr95=0.89528
+  ood_mahal_unk_ood:  auroc=0.56055, aupr=0.75076, fpr95=0.90973
+
+[Transformer — transformer_20260522_163620]
+  cls_test_known:     mc_acc=0.89053, bin_acc=0.93248, f1=0.93312, auc=0.98267
+  ood_msp_unk_fam:    auroc=0.56481, aupr=0.62704, fpr95=0.89845
+  ood_msp_unk_ood:    auroc=0.53963, aupr=0.72785, fpr95=0.92880
+  ood_energy_unk_fam: auroc=0.73550, aupr=0.74539, fpr95=0.74433
+  ood_energy_unk_ood: auroc=0.57995, aupr=0.76783, fpr95=0.89750
+  ood_mahal_unk_fam:  auroc=0.53286, aupr=0.61201, fpr95=0.96903
+  ood_mahal_unk_ood:  auroc=0.50077, aupr=0.71937, fpr95=0.95158
+
+[Extra OOD — extra_ood_20260523_115115 — chỉ ghi best per group]
+  cnn_energy_unk_fam:              auroc=0.80025, aupr=0.80677, fpr95=0.65293
+  cnn_energy_unk_ood:              auroc=0.53910, aupr=0.75256, fpr95=0.96238
+  cnn_odin_T1000_e0.005_unk_fam:   auroc=0.77756, aupr=0.80222, fpr95=0.81660
+  cnn_odin_T1000_e0.005_unk_ood:   auroc=0.51644, aupr=0.73284, fpr95=0.97733
+  cnn_knn_k5_unk_fam:              auroc=0.56528, aupr=0.66834, fpr95=0.92805
+  cnn_knn_k5_unk_ood:              auroc=0.68378, aupr=0.84227, fpr95=0.83963
+  cnn_hybrid_e+knn_k5_unk_fam:     auroc=0.79639, aupr=0.81760, fpr95=0.56485
+  cnn_hybrid_e+knn_k5_unk_ood:     auroc=0.69370, aupr=0.84421, fpr95=0.79718
+  bilstm_odin_T1000_e0.005_unk_fam:auroc=0.80211, aupr=0.80574, fpr95=0.61250
+  bilstm_odin_T1000_e0.005_unk_ood:auroc=0.54513, aupr=0.73636, fpr95=0.90140
+  bilstm_knn_k5_unk_fam:           auroc=0.61102, aupr=0.67478, fpr95=0.88445
+  bilstm_knn_k5_unk_ood:           auroc=0.71760, aupr=0.85302, fpr95=0.69465
+  bilstm_hybrid_e+knn_k50_unk_fam: auroc=0.81528, aupr=0.82362, fpr95=0.52853
+  bilstm_hybrid_e+knn_k5_unk_ood:  auroc=0.69206, aupr=0.84034, fpr95=0.72995
+
+[Hybrid LogReg — hybrid_20260523_114954]
+  hybrid_unk_fam:         auroc=0.88508, aupr=0.80824, fpr95=0.39113
+  hybrid_unk_ood_holdout: auroc=0.63238, aupr=0.68382, fpr95=0.79963  [50k holdout]
+  logreg: coef_energy=0.8495, coef_knn=0.8669, intercept=0.7708, val_auroc=0.7236
+
+================================================================================
+  END OF REPORT
+================================================================================
