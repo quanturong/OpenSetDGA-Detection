@@ -8,6 +8,13 @@ Ghi chú về metric:
   AUPR     ↑  (Average Precision, OOD là positive class)
   FPR@95   ↓  (False Positive Rate khi True Positive Rate = 95%, thấp = tốt)
 
+Ghi chú về phiên bản:
+  File này ghi nhận kết quả lần chạy đầu tiên (2026-05-22~23).
+  Sau khi bổ sung metrics theo yêu cầu thầy, cần chạy lại 4 script huấn luyện
+  (train_multiclass, train_neural, train_bilstm, train_transformer) và cập nhật
+  thêm: Macro-F1 và per-family F1 (mục G), confusion_matrix.csv mỗi model.
+  Bảng 1 hiện chỉ có Acc, F1, AUC — Macro-F1 và per-family F1 chưa có.
+
 Hai tập đánh giá OOD:
   unknown_family  → DGA từ họ HOÀN TOÀN MỚI (open-set DGA, không thấy trong train)
   unknown_ood     → Domain thực từ blocklist/phishing (real-world OOD)
