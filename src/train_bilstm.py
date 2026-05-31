@@ -26,7 +26,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
-from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -234,8 +233,6 @@ def main():
     ap.add_argument("--patience", type=int, default=5)
     ap.add_argument("--energy_T", type=float, default=1.0,
                     help="Temperature for energy score")
-    ap.add_argument("--knn_k", type=int, default=5)
-    ap.add_argument("--knn_subsample", type=int, default=50_000)
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args()
 
@@ -370,21 +367,6 @@ def main():
     scorer.fit(feats["train"], y_train, min_samples=10, reg=1e-4)
     log.info("  Done.")
 
-    # ── 8b. Fit KNN scorer ────────────────────────────────────────────────
-    log.info(f"Building KNN index (k={args.knn_k}) ...")
-    train_feats_knn = feats["train"]
-    if len(train_feats_knn) > args.knn_subsample:
-        rng_knn = np.random.default_rng(42)
-        idx_knn = rng_knn.choice(len(train_feats_knn), size=args.knn_subsample, replace=False)
-        train_feats_knn = train_feats_knn[idx_knn]
-    knn = NearestNeighbors(n_neighbors=args.knn_k, algorithm="auto", n_jobs=-1)
-    knn.fit(train_feats_knn)
-    log.info("  Done.")
-
-    def _knn_score(split):
-        dists, _ = knn.kneighbors(feats[split])
-        return dists.mean(axis=1)
-
     # ── 9. Classification eval ────────────────────────────────────────────
     log.info("=" * 65)
     log.info("  Classification Results (test_known)")
@@ -425,18 +407,16 @@ def main():
         "msp": _msp_score,
         "energy": _energy_score,
         "mahalanobis": lambda split: scorer.score(feats[split]),
-        "knn": _knn_score,
     }
     id_scores = {
         "msp": _msp_score("test_known"),
         "energy": _energy_score("test_known"),
         "mahalanobis": scorer.score(feats["test_known"]),
-        "knn": _knn_score("test_known"),
     }
     ood_splits = ["unknown_family", "unknown_ood"]
 
     for sname, sfn in scorer_fns.items():
-        print(f"\n── {sname} ──")
+        log.info(f"\n── {sname} ──")
         for split in ood_splits:
             ood_s = sfn(split)
             m = ood_metrics(id_scores[sname], ood_s)
@@ -467,7 +447,7 @@ def main():
     log.info(f"  Binary  (test_known): Acc={ck['bin_accuracy']:.4f}  F1={ck['bin_f1']:.4f}"
              f"  AUC={ck['bin_roc_auc']:.4f}")
     log.info(f"  {n_classes}-class(test_known): Acc={ck['mc_accuracy']:.4f}")
-    for sn in ["msp", "energy", "mahalanobis", "knn"]:
+    for sn in ["msp", "energy", "mahalanobis"]:
         log.info(f"\n  OOD ({sn}):")
         for sl in ood_splits:
             m = results[f"ood_{sn}_{sl}"]
