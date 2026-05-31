@@ -272,12 +272,33 @@ _DGA_FAMILIES = {
 }
 
 
-def _verdict(row: dict, threshold: float) -> tuple[str, str]:
-    is_ood = row["msp_score"] > threshold
+def _ood_score(row: dict, scorer: str) -> float:
+    """Return the OOD score for the chosen scorer."""
+    if scorer == "Energy":
+        v = row.get("energy_score", float("nan"))
+        # Energy is negative: more negative = more in-dist.
+        # Normalise to [0,1]-ish by negating and shifting so higher = more OOD.
+        return float(-v) if not (v != v) else 0.0   # nan → 0
+    return float(row["msp_score"])   # MSP: already 0-1, higher = more OOD
+
+
+def _verdict(row: dict, threshold: float, scorer: str = "MSP") -> tuple[str, str]:
+    score = _ood_score(row, scorer)
+    # For Energy we need a different scale — use quantile-free comparison:
+    # threshold slider is always 0-1; Energy raw values are negative floats.
+    # We map: threshold on slider → same threshold on MSP; for Energy we
+    # remap threshold to energy domain: energy_thresh = -threshold * 20
+    if scorer == "Energy":
+        energy_val = row.get("energy_score", 0.0)
+        energy_thresh = -threshold * 20          # e.g. 0.5 → -10
+        is_ood = float(energy_val) > energy_thresh
+    else:
+        is_ood = score > threshold
+
     cls = row["predicted_class"]
     if is_ood:
         return "Unknown / OOD", "#e74c3c"
-    if cls in ("benign",):
+    if cls == "benign":
         return "Benign", "#27ae60"
     return f"DGA – {cls}", "#e67e22"
 
@@ -311,17 +332,32 @@ tab_detect, tab_compare, tab_eda = st.tabs(["Domain Detection", "Model Compariso
 # TAB 1 – DOMAIN DETECTION
 # ══════════════════════════════════════════════════════════════════════════════
 
+_SCORER_OPTIONS = {
+    "bilstm":    ["MSP", "Energy"],
+    "bilstm_oe": ["MSP", "Energy"],
+    "cnn":       ["MSP", "Energy"],
+    "lgbm_mc":   ["MSP"],
+    "lgbm":      ["MSP"],
+}
+
 with tab_detect:
     with st.sidebar:
         st.header("Settings")
         selected_model_label = st.selectbox("Model", list(MODEL_OPTIONS.keys()))
         selected_model_key = MODEL_OPTIONS[selected_model_label]
 
+        available_scorers = _SCORER_OPTIONS[selected_model_key]
+        selected_scorer = st.selectbox(
+            "OOD Scorer",
+            options=available_scorers,
+            help="MSP: 1 − max softmax prob · Energy: −T·log Σ exp(logit/T). "
+                 "Higher score → more likely OOD.",
+        )
+
         ood_threshold = st.slider(
-            "OOD threshold (MSP score)",
+            f"OOD threshold ({selected_scorer})",
             min_value=0.10, max_value=0.90, value=0.50, step=0.05,
-            help="Domains whose MSP score exceeds this are flagged as unknown/OOD. "
-                 "Not applicable to LGBM (binary output).",
+            help="Domains whose OOD score exceeds this are flagged as Unknown/OOD.",
         )
         st.divider()
         st.subheader("Known DGA families (19)")
@@ -357,12 +393,12 @@ with tab_detect:
                 results = run_inference(selected_model_key, domains)
 
             st.divider()
-            st.subheader(f"Results — {len(results)} domain(s)  ·  model: **{selected_model_label}**")
+            st.subheader(f"Results — {len(results)} domain(s)  ·  {selected_model_label}  ·  scorer: **{selected_scorer}**")
 
             is_lgbm = selected_model_key in ("lgbm", "lgbm_mc")
             table_rows = []
             for r in results:
-                verdict, _ = _verdict(r, ood_threshold)
+                verdict, _ = _verdict(r, ood_threshold, selected_scorer)
                 row = {
                     "Domain": r["domain"],
                     "Prediction": r["predicted_class"],
@@ -372,7 +408,9 @@ with tab_detect:
                 }
                 if not is_lgbm:
                     row["MSP score"] = f"{r['msp_score']:.4f}"
-                    row["Energy score"] = f"{r['energy_score']:.4f}" if not pd.isna(r["energy_score"]) else "—"
+                    ev = r.get("energy_score", float("nan"))
+                    row["Energy score"] = f"{ev:.4f}" if ev == ev else "—"
+                    row[f"↳ Active ({selected_scorer})"] = f"{_ood_score(r, selected_scorer):.4f}"
                 table_rows.append(row)
 
             df_res = pd.DataFrame(table_rows)
@@ -386,14 +424,14 @@ with tab_detect:
                 len(results) == 1 or st.checkbox("Show probability charts", value=len(results) <= 5)
             ):
                 for r in results:
-                    verdict, color = _verdict(r, ood_threshold)
+                    verdict, color = _verdict(r, ood_threshold, selected_scorer)
                     icon = "🟢" if verdict == "Benign" else ("🔴" if verdict == "Unknown / OOD" else "🟠")
                     with st.expander(f"{icon} {r['domain']}  —  {verdict}", expanded=len(results) == 1):
                         c1, c2, c3, c4 = st.columns(4)
                         c1.metric("Predicted class", r["predicted_class"].upper())
                         c2.metric("Confidence", f"{r['confidence']:.1%}")
                         c3.metric("DGA probability", f"{r['dga_prob']:.1%}")
-                        c4.metric("MSP score", f"{r['msp_score']:.3f}")
+                        c4.metric(f"{selected_scorer} score", f"{_ood_score(r, selected_scorer):.4f}")
                         prob_df = pd.DataFrame({
                             "Class": _CLASSES, "Probability": r["probabilities"],
                         }).sort_values("Probability", ascending=False)
