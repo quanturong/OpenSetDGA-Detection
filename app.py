@@ -387,7 +387,8 @@ with tab_detect:
             ):
                 for r in results:
                     verdict, color = _verdict(r, ood_threshold)
-                    with st.expander(f"**{r['domain']}** — {_badge(verdict, color)}", expanded=len(results) == 1):
+                    icon = "🟢" if verdict == "Benign" else ("🔴" if verdict == "Unknown / OOD" else "🟠")
+                    with st.expander(f"{icon} {r['domain']}  —  {verdict}", expanded=len(results) == 1):
                         c1, c2, c3, c4 = st.columns(4)
                         c1.metric("Predicted class", r["predicted_class"].upper())
                         c2.metric("Confidence", f"{r['confidence']:.1%}")
