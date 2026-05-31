@@ -163,6 +163,19 @@ def _load_lgbm_mc():
     return booster
 
 
+@st.cache_resource(show_spinner="Loading KNN index…")
+def _load_knn(k: int = 5):
+    from sklearn.neighbors import NearestNeighbors
+    import io
+    gz_path = MODELS_DIR / "bilstm_knn_features.npz.gz"
+    with gzip.open(gz_path, "rb") as gz:
+        data = np.load(io.BytesIO(gz.read()))
+    train_feats = data["features"]
+    nn = NearestNeighbors(n_neighbors=k, metric="euclidean", algorithm="auto", n_jobs=-1)
+    nn.fit(train_feats)
+    return nn
+
+
 @st.cache_data(show_spinner="Loading EDA data…")
 def load_eda_data() -> pd.DataFrame:
     return pd.read_csv(EDA_DATA_PATH)
@@ -170,13 +183,22 @@ def load_eda_data() -> pd.DataFrame:
 
 # ── inference ─────────────────────────────────────────────────────────────────
 
-def _neural_predict(model, domains, energy_T=1.0):
+def _neural_predict(model, domains, energy_T=1.0, knn_index=None):
     x = torch.tensor(tokenize_batch(domains), dtype=torch.long)
     with torch.no_grad():
-        logits, _ = model(x)
-    probs = F.softmax(logits, dim=-1).numpy()
+        logits, feats = model(x)
+    probs  = F.softmax(logits, dim=-1).numpy()
     energy = -(energy_T * torch.logsumexp(logits / energy_T, dim=-1)).numpy()
-    msp = 1.0 - probs.max(axis=1)
+    msp    = 1.0 - probs.max(axis=1)
+    feats_np = feats.numpy()
+
+    # KNN score = distance to k-th nearest neighbor in training features
+    if knn_index is not None:
+        dists, _ = knn_index.kneighbors(feats_np)
+        knn_scores = dists[:, -1].astype(np.float32)   # k-th neighbor distance
+    else:
+        knn_scores = np.full(len(domains), float("nan"))
+
     benign_idx = _CLASSES.index("benign")
     rows = []
     for i, domain in enumerate(domains):
@@ -188,6 +210,7 @@ def _neural_predict(model, domains, energy_T=1.0):
             "dga_prob": float(1.0 - probs[i, benign_idx]),
             "msp_score": float(msp[i]),
             "energy_score": float(energy[i]),
+            "knn_score": float(knn_scores[i]),
             "probabilities": probs[i].tolist(),
         })
     return rows
@@ -244,10 +267,11 @@ MODEL_OPTIONS = {
 }
 
 
-def run_inference(model_key: str, domains: list[str]) -> list[dict]:
+def run_inference(model_key: str, domains: list[str], scorer: str = "MSP") -> list[dict]:
     if model_key == "bilstm":
         model, energy_T = _load_bilstm()
-        return _neural_predict(model, domains, energy_T)
+        knn = _load_knn() if scorer == "KNN" else None
+        return _neural_predict(model, domains, energy_T, knn_index=knn)
     if model_key == "bilstm_oe":
         model, energy_T = _load_bilstm_oe()
         return _neural_predict(model, domains, energy_T)
@@ -273,27 +297,25 @@ _DGA_FAMILIES = {
 
 
 def _ood_score(row: dict, scorer: str) -> float:
-    """Return the OOD score for the chosen scorer."""
+    """Return the OOD score for the chosen scorer (higher = more OOD)."""
     if scorer == "Energy":
         v = row.get("energy_score", float("nan"))
-        # Energy is negative: more negative = more in-dist.
-        # Normalise to [0,1]-ish by negating and shifting so higher = more OOD.
-        return float(-v) if not (v != v) else 0.0   # nan → 0
-    return float(row["msp_score"])   # MSP: already 0-1, higher = more OOD
+        return float(-v) if v == v else 0.0    # negate: less negative = more OOD
+    if scorer == "KNN":
+        v = row.get("knn_score", float("nan"))
+        return float(v) if v == v else 0.0     # larger distance = more OOD
+    return float(row["msp_score"])             # MSP: 0-1, higher = more OOD
 
 
 def _verdict(row: dict, threshold: float, scorer: str = "MSP") -> tuple[str, str]:
     score = _ood_score(row, scorer)
-    # For Energy we need a different scale — use quantile-free comparison:
-    # threshold slider is always 0-1; Energy raw values are negative floats.
-    # We map: threshold on slider → same threshold on MSP; for Energy we
-    # remap threshold to energy domain: energy_thresh = -threshold * 20
+    # threshold slider is 0.1–0.9; rescale for Energy/KNN to their natural range
     if scorer == "Energy":
-        energy_val = row.get("energy_score", 0.0)
-        energy_thresh = -threshold * 20          # e.g. 0.5 → -10
-        is_ood = float(energy_val) > energy_thresh
+        is_ood = score > threshold * 20        # Energy negated range ≈ 0–20
+    elif scorer == "KNN":
+        is_ood = score > threshold * 50        # KNN distance range ≈ 0–50
     else:
-        is_ood = score > threshold
+        is_ood = score > threshold             # MSP: 0–1
 
     cls = row["predicted_class"]
     if is_ood:
@@ -333,7 +355,7 @@ tab_detect, tab_compare, tab_eda = st.tabs(["Domain Detection", "Model Compariso
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SCORER_OPTIONS = {
-    "bilstm":    ["MSP", "Energy"],
+    "bilstm":    ["MSP", "Energy", "KNN"],
     "bilstm_oe": ["MSP", "Energy"],
     "cnn":       ["MSP", "Energy"],
     "lgbm_mc":   ["MSP"],
@@ -389,8 +411,8 @@ with tab_detect:
         if not domains:
             st.warning("Enter at least one domain.")
         else:
-            with st.spinner(f"Running {selected_model_label}…"):
-                results = run_inference(selected_model_key, domains)
+            with st.spinner(f"Running {selected_model_label} · scorer: {selected_scorer}…"):
+                results = run_inference(selected_model_key, domains, scorer=selected_scorer)
 
             st.divider()
             st.subheader(f"Results — {len(results)} domain(s)  ·  {selected_model_label}  ·  scorer: **{selected_scorer}**")
@@ -407,9 +429,11 @@ with tab_detect:
                     "Verdict": verdict if not is_lgbm else ("Benign" if r["predicted_class"] == "benign" else "DGA"),
                 }
                 if not is_lgbm:
-                    row["MSP score"] = f"{r['msp_score']:.4f}"
+                    row["MSP score"]    = f"{r['msp_score']:.4f}"
                     ev = r.get("energy_score", float("nan"))
                     row["Energy score"] = f"{ev:.4f}" if ev == ev else "—"
+                    kv = r.get("knn_score", float("nan"))
+                    row["KNN score"]    = f"{kv:.4f}" if kv == kv else "—"
                     row[f"↳ Active ({selected_scorer})"] = f"{_ood_score(r, selected_scorer):.4f}"
                 table_rows.append(row)
 
