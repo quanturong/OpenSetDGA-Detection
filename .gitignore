@@ -43,6 +43,7 @@ dataset_cache/
 baseline_out/
 _feature_cache/
 .tldextract_cache/
+data/processed/known/train_backup.csv
 
 *.md
 *.pdf
