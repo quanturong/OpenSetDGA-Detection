@@ -31,6 +31,9 @@ from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader, TensorDataset
 
 from ood_utils import ood_metrics, print_ood_metrics
+from logger import get_logger
+
+log = get_logger(__name__)
 
 # ── tokenization (shared with train_neural.py) ──────────────────────────────
 
@@ -244,28 +247,28 @@ def main():
     csvs = _csv_paths(args.run_dir)
 
     # ── 1. Load data ──────────────────────────────────────────────────────
-    print("Loading CSVs …")
+    log.info("Loading CSVs ...")
     dfs = {k: pd.read_csv(str(p)) for k, p in csvs.items()}
     for k, df in dfs.items():
-        print(f"  {k:20s}: {len(df):>8,} rows")
+        log.info(f"  {k:20s}: {len(df):>8,} rows")
 
     # ── 2. Label encoding ────────────────────────────────────────────────
     le = LabelEncoder()
     le.fit(dfs["train"]["class_label"].values)
     n_classes = len(le.classes_)
     benign_idx = int(np.where(le.classes_ == "benign")[0][0])
-    print(f"\n  {n_classes} classes: {list(le.classes_)}")
+    log.info(f"  {n_classes} classes: {list(le.classes_)}")
 
     y_train = le.transform(dfs["train"]["class_label"].values)
     y_val = le.transform(dfs["val"]["class_label"].values)
     y_test = le.transform(dfs["test_known"]["class_label"].values)
 
     # ── 3. Tokenize ───────────────────────────────────────────────────────
-    print("\nTokenizing domains …")
+    log.info("Tokenizing domains ...")
     tok = {}
     for k, df in dfs.items():
         tok[k] = tokenize_batch(df["domain"].tolist())
-        print(f"  {k:20s}: {tok[k].shape}")
+        log.info(f"  {k:20s}: {tok[k].shape}")
 
     # ── 4. Build data loaders ─────────────────────────────────────────────
     train_loader = _make_loader_labeled(tok["train"], y_train, args.batch, shuffle=True)
@@ -282,7 +285,7 @@ def main():
         dropout=args.dropout,
     ).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"\nDomainBiLSTM: {n_params:,} trainable parameters")
+    log.info(f"DomainBiLSTM: {n_params:,} trainable parameters")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -291,7 +294,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
 
     # ── 6. Training loop ──────────────────────────────────────────────────
-    print("\nTraining …")
+    log.info("Training ...")
     best_val_loss = float("inf")
     best_state = None
     no_improve = 0
@@ -333,8 +336,8 @@ def main():
 
         scheduler.step()
         lr_now = optimizer.param_groups[0]["lr"]
-        print(f"  E{epoch:02d}: train_loss={train_loss:.4f} acc={train_acc:.4f}"
-              f"  val_loss={val_loss:.4f} acc={val_acc:.4f}  lr={lr_now:.2e}")
+        log.info(f"  E{epoch:02d}: train_loss={train_loss:.4f} acc={train_acc:.4f}"
+                 f"  val_loss={val_loss:.4f} acc={val_acc:.4f}  lr={lr_now:.2e}")
 
         if val_loss < best_val_loss - 1e-4:
             best_val_loss = val_loss
@@ -343,15 +346,15 @@ def main():
         else:
             no_improve += 1
             if no_improve >= args.patience:
-                print(f"  Early stopping at epoch {epoch}.")
+                log.info(f"  Early stopping at epoch {epoch}.")
                 break
 
     model.load_state_dict(best_state)
     torch.save(best_state, str(out_dir / "model.pt"))
-    print(f"  Best model saved → {out_dir / 'model.pt'}")
+    log.info(f"  Best model saved → {out_dir / 'model.pt'}")
 
     # ── 7. Extract penultimate features for all splits ────────────────────
-    print("\nExtracting penultimate features …")
+    log.info("Extracting penultimate features ...")
     feat_loaders = {
         k: _make_loader(tok[k], batch_size=1024)
         for k in ["train", "test_known", "unknown_family", "unknown_ood"]
@@ -359,16 +362,16 @@ def main():
     feats, logits = {}, {}
     for k, loader in feat_loaders.items():
         feats[k], logits[k] = _extract_features(model, loader, device)
-        print(f"  {k:20s}: feats={feats[k].shape}")
+        log.info(f"  {k:20s}: feats={feats[k].shape}")
 
     # ── 8. Fit Mahalanobis scorer ─────────────────────────────────────────
-    print("\nFitting Mahalanobis scorer …")
+    log.info("Fitting Mahalanobis scorer ...")
     scorer = MahalanobisScorer()
     scorer.fit(feats["train"], y_train, min_samples=10, reg=1e-4)
-    print("  Done.")
+    log.info("  Done.")
 
     # ── 8b. Fit KNN scorer ────────────────────────────────────────────────
-    print(f"\nBuilding KNN index (k={args.knn_k}) ...")
+    log.info(f"Building KNN index (k={args.knn_k}) ...")
     train_feats_knn = feats["train"]
     if len(train_feats_knn) > args.knn_subsample:
         rng_knn = np.random.default_rng(42)
@@ -376,16 +379,16 @@ def main():
         train_feats_knn = train_feats_knn[idx_knn]
     knn = NearestNeighbors(n_neighbors=args.knn_k, algorithm="auto", n_jobs=-1)
     knn.fit(train_feats_knn)
-    print("  Done.")
+    log.info("  Done.")
 
     def _knn_score(split):
         dists, _ = knn.kneighbors(feats[split])
         return dists.mean(axis=1)
 
     # ── 9. Classification eval ────────────────────────────────────────────
-    print("\n" + "=" * 65)
-    print("  Classification Results (test_known)")
-    print("=" * 65)
+    log.info("=" * 65)
+    log.info("  Classification Results (test_known)")
+    log.info("=" * 65)
     results = {}
 
     proba_test = F.softmax(torch.tensor(logits["test_known"]), dim=-1).numpy()
@@ -397,16 +400,16 @@ def main():
     bin_acc = accuracy_score(y_bin, (p_dga >= 0.5).astype(int))
     bin_f1 = f1_score(y_bin, (p_dga >= 0.5).astype(int))
     bin_auc = roc_auc_score(y_bin, p_dga)
-    print(f"  MC-acc={mc_acc:.4f}  Bin-acc={bin_acc:.4f}  F1={bin_f1:.4f}  AUC={bin_auc:.4f}")
+    log.info(f"  MC-acc={mc_acc:.4f}  Bin-acc={bin_acc:.4f}  F1={bin_f1:.4f}  AUC={bin_auc:.4f}")
     results["cls_test_known"] = {
         "mc_accuracy": float(mc_acc), "bin_accuracy": float(bin_acc),
         "bin_f1": float(bin_f1), "bin_roc_auc": float(bin_auc),
     }
 
     # ── 10. OOD evaluation ────────────────────────────────────────────────
-    print("\n" + "=" * 65)
-    print("  OOD Detection Evaluation")
-    print("=" * 65)
+    log.info("=" * 65)
+    log.info("  OOD Detection Evaluation")
+    log.info("=" * 65)
 
     T = args.energy_T
 
@@ -457,21 +460,21 @@ def main():
     with open(str(out_dir / "results.json"), "w") as f:
         json.dump(results, f, indent=2, default=str)
 
-    print("\n" + "=" * 70)
-    print("  SUMMARY")
-    print("=" * 70)
+    log.info("=" * 70)
+    log.info("  SUMMARY")
+    log.info("=" * 70)
     ck = results["cls_test_known"]
-    print(f"  Binary  (test_known): Acc={ck['bin_accuracy']:.4f}  F1={ck['bin_f1']:.4f}"
-          f"  AUC={ck['bin_roc_auc']:.4f}")
-    print(f"  {n_classes}-class(test_known): Acc={ck['mc_accuracy']:.4f}")
+    log.info(f"  Binary  (test_known): Acc={ck['bin_accuracy']:.4f}  F1={ck['bin_f1']:.4f}"
+             f"  AUC={ck['bin_roc_auc']:.4f}")
+    log.info(f"  {n_classes}-class(test_known): Acc={ck['mc_accuracy']:.4f}")
     for sn in ["msp", "energy", "mahalanobis", "knn"]:
-        print(f"\n  OOD ({sn}):")
+        log.info(f"\n  OOD ({sn}):")
         for sl in ood_splits:
             m = results[f"ood_{sn}_{sl}"]
-            print(f"    {sl:20s}: AUROC={m['auroc']:.4f}  AUPR-OUT={m['aupr_out']:.4f}"
-                  f"  FPR@95={m['fpr_at_tpr']:.4f}")
+            log.info(f"    {sl:20s}: AUROC={m['auroc']:.4f}  AUPR-OUT={m['aupr_out']:.4f}"
+                     f"  FPR@95={m['fpr_at_tpr']:.4f}")
 
-    print(f"\nAll results → {out_dir}")
+    log.info(f"All results → {out_dir}")
 
 
 if __name__ == "__main__":

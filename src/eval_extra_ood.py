@@ -258,21 +258,21 @@ def main():
     csvs = _csv_paths(args.run_dir)
 
     # ── Load data ─────────────────────────────────────────────────────────
-    print("Loading CSVs …")
+    log.info("Loading CSVs …")
     dfs = {k: pd.read_csv(str(p)) for k, p in csvs.items()}
     for k, df in dfs.items():
-        print(f"  {k:20s}: {len(df):>8,} rows")
+        log.info(f"  {k:20s}: {len(df):>8,} rows")
 
     le = LabelEncoder()
     le.fit(dfs["train"]["class_label"].values)
     n_classes = len(le.classes_)
-    print(f"\n  {n_classes} classes")
+    log.info(f"\n  {n_classes} classes")
 
-    print("\nTokenizing …")
+    log.info("\nTokenizing …")
     tok = {}
     for k, df in dfs.items():
         tok[k] = tokenize_batch(df["domain"].tolist())
-        print(f"  {k:20s}: {tok[k].shape}")
+        log.info(f"  {k:20s}: {tok[k].shape}")
 
     results = {}
     ood_splits = ["unknown_family", "unknown_ood"]
@@ -280,9 +280,9 @@ def main():
     # ==================================================================
     #  1. CNN + Energy
     # ==================================================================
-    print("\n" + "=" * 70)
-    print("  EXPERIMENT 1: CNN + Energy score on raw logits")
-    print("=" * 70)
+    log.info("\n" + "=" * 70)
+    log.info("  EXPERIMENT 1: CNN + Energy score on raw logits")
+    log.info("=" * 70)
 
     cnn = DomainCNN(VOCAB_SIZE, embed_dim=32, n_classes=n_classes,
                     feat_dim=128).to(device)
@@ -290,16 +290,16 @@ def main():
         str(Path(args.cnn_dir) / "model.pt"),
         map_location=device, weights_only=True))
     cnn.eval()
-    print("  CNN model loaded.")
+    log.info("  CNN model loaded.")
 
     cnn_logits, cnn_feats = {}, {}
     for k in ["test_known"] + ood_splits:
         cnn_logits[k], cnn_feats[k] = extract_logits_feats(
             cnn, tok[k], device, is_bilstm=False)
-        print(f"  {k:20s}: logits={tuple(cnn_logits[k].shape)}")
+        log.info(f"  {k:20s}: logits={tuple(cnn_logits[k].shape)}")
 
     # CNN Energy
-    print("\n── cnn_energy ──")
+    log.info("\n── cnn_energy ──")
     id_e = energy_score(cnn_logits["test_known"])
     for split in ood_splits:
         ood_e = energy_score(cnn_logits[split])
@@ -308,7 +308,7 @@ def main():
         print_ood_metrics(m, split)
 
     # CNN MSP (reference — should match original results)
-    print("\n── cnn_msp (reference) ──")
+    log.info("\n── cnn_msp (reference) ──")
     id_m = msp_score(cnn_logits["test_known"])
     for split in ood_splits:
         ood_m = msp_score(cnn_logits[split])
@@ -319,9 +319,9 @@ def main():
     # ==================================================================
     #  2. ODIN on CNN and BiLSTM
     # ==================================================================
-    print("\n" + "=" * 70)
-    print("  EXPERIMENT 2: ODIN (temperature + embedding perturbation)")
-    print("=" * 70)
+    log.info("\n" + "=" * 70)
+    log.info("  EXPERIMENT 2: ODIN (temperature + embedding perturbation)")
+    log.info("=" * 70)
 
     bilstm = DomainBiLSTM(VOCAB_SIZE, embed_dim=32, n_classes=n_classes,
                            hidden_dim=64, num_layers=1, feat_dim=128,
@@ -330,13 +330,13 @@ def main():
         str(Path(args.bilstm_dir) / "model.pt"),
         map_location=device, weights_only=True))
     bilstm.eval()
-    print("  BiLSTM model loaded.")
+    log.info("  BiLSTM model loaded.")
 
     T = args.odin_T
     for eps in args.odin_eps:
         # CNN ODIN
         tag = f"cnn_odin_T{int(T)}_e{eps}"
-        print(f"\n── {tag} ──")
+        log.info(f"\n── {tag} ──")
         t0 = time.time()
         id_s = odin_score(cnn, tok["test_known"], device,
                           T=T, epsilon=eps, is_bilstm=False)
@@ -346,11 +346,11 @@ def main():
             m = ood_metrics(id_s, ood_s)
             results[f"{tag}_{split}"] = m
             print_ood_metrics(m, split)
-        print(f"  ({time.time() - t0:.0f}s)")
+        log.info(f"  ({time.time() - t0:.0f}s)")
 
         # BiLSTM ODIN
         tag = f"bilstm_odin_T{int(T)}_e{eps}"
-        print(f"\n── {tag} ──")
+        log.info(f"\n── {tag} ──")
         t0 = time.time()
         id_s = odin_score(bilstm, tok["test_known"], device,
                           T=T, epsilon=eps, is_bilstm=True)
@@ -360,33 +360,33 @@ def main():
             m = ood_metrics(id_s, ood_s)
             results[f"{tag}_{split}"] = m
             print_ood_metrics(m, split)
-        print(f"  ({time.time() - t0:.0f}s)")
+        log.info(f"  ({time.time() - t0:.0f}s)")
 
     # ==================================================================
     #  3. KNN on neural features + Hybrid
     # ==================================================================
-    print("\n" + "=" * 70)
-    print("  EXPERIMENT 3: KNN on neural features + Hybrid (energy + KNN)")
-    print("=" * 70)
+    log.info("\n" + "=" * 70)
+    log.info("  EXPERIMENT 3: KNN on neural features + Hybrid (energy + KNN)")
+    log.info("=" * 70)
 
     # Extract BiLSTM features (including training set for KNN)
-    print("\nExtracting BiLSTM features …")
+    log.info("\nExtracting BiLSTM features …")
     bilstm_logits, bilstm_feats = {}, {}
     for k in ["train", "test_known"] + ood_splits:
         bilstm_logits[k], bilstm_feats[k] = extract_logits_feats(
             bilstm, tok[k], device, is_bilstm=True)
-        print(f"  {k:20s}: feats={bilstm_feats[k].shape}")
+        log.info(f"  {k:20s}: feats={bilstm_feats[k].shape}")
 
     # Extract CNN train features for KNN
-    print("\nExtracting CNN train features …")
+    log.info("\nExtracting CNN train features …")
     cnn_logits["train"], cnn_feats["train"] = extract_logits_feats(
         cnn, tok["train"], device, is_bilstm=False)
-    print(f"  train               : feats={cnn_feats['train'].shape}")
+    log.info(f"  train               : feats={cnn_feats['train'].shape}")
 
     # KNN on BiLSTM features
     for k_val in args.knn_k:
         tag = f"bilstm_knn_k{k_val}"
-        print(f"\n-- {tag} --")
+        log.info(f"\n-- {tag} --")
         t0 = time.time()
         id_s = knn_score(bilstm_feats["train"], bilstm_feats["test_known"], k=k_val)
 
@@ -407,12 +407,12 @@ def main():
             pd.DataFrame({"domain": split_domains, "ood_score": ood_s}).to_csv(
                 out_dir / f"scores_{tag}_{split_key}.csv", index=False)
 
-        print(f"  ({time.time() - t0:.0f}s)")
+        log.info(f"  ({time.time() - t0:.0f}s)")
 
     # KNN on CNN features
     for k_val in args.knn_k:
         tag = f"cnn_knn_k{k_val}"
-        print(f"\n── {tag} ──")
+        log.info(f"\n── {tag} ──")
         t0 = time.time()
         id_s = knn_score(cnn_feats["train"], cnn_feats["test_known"], k=k_val)
         for split in ood_splits:
@@ -420,7 +420,7 @@ def main():
             m = ood_metrics(id_s, ood_s)
             results[f"{tag}_{split}"] = m
             print_ood_metrics(m, split)
-        print(f"  ({time.time() - t0:.0f}s)")
+        log.info(f"  ({time.time() - t0:.0f}s)")
 
     # Hybrid: normalized energy + normalized KNN
     # Normalize by ID statistics to avoid OOD information leakage
@@ -430,7 +430,7 @@ def main():
             ("cnn", cnn_logits, cnn_feats["train"], cnn_feats),
         ]:
             tag = f"{model_name}_hybrid_energy_knn_k{k_val}"
-            print(f"\n── {tag} ──")
+            log.info(f"\n── {tag} ──")
 
             # ID scores
             id_energy = energy_score(m_logits["test_known"])
@@ -456,20 +456,20 @@ def main():
         json.dump(results, f, indent=2, default=str)
 
     # ── Summary: top scorers per split ────────────────────────────────────
-    print("\n" + "=" * 70)
-    print("  SUMMARY — Best AUROC per split")
-    print("=" * 70)
+    log.info("\n" + "=" * 70)
+    log.info("  SUMMARY — Best AUROC per split")
+    log.info("=" * 70)
     for split in ood_splits:
-        print(f"\n  {split}:")
+        log.info(f"\n  {split}:")
         split_results = {k: v for k, v in results.items() if k.endswith(f"_{split}")}
         ranked = sorted(split_results.items(),
                         key=lambda x: x[1]["auroc"], reverse=True)
         for rank, (name, met) in enumerate(ranked[:10], 1):
             tag = name.replace(f"_{split}", "")
-            print(f"    {rank:2d}. {tag:45s}  "
+            log.info(f"    {rank:2d}. {tag:45s}  "
                   f"AUROC={met['auroc']:.4f}  FPR@95={met['fpr_at_tpr']:.4f}")
 
-    print(f"\nAll results → {out_dir}")
+    log.info(f"\nAll results → {out_dir}")
 
 
 if __name__ == "__main__":

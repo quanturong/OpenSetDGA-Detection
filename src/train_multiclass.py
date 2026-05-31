@@ -32,6 +32,9 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from features import FEATURE_NAMES, extract_features_batch
 from ood_utils import ood_metrics, print_ood_metrics
+from logger import get_logger
+
+log = get_logger(__name__)
 
 
 # ── feature extraction (reuses cache written by train_baseline.py) ──────────
@@ -40,7 +43,7 @@ def _featurise(df: pd.DataFrame, cache_dir: Path | None, tag: str) -> np.ndarray
     if cache_dir is not None:
         cf = cache_dir / f"{tag}_feats.npy"
         if cf.exists():
-            print(f"  [cache hit] {cf}")
+            log.info(f"  [cache hit] {cf}")
             return np.load(str(cf))
 
     domains = df["domain"].tolist()
@@ -49,8 +52,7 @@ def _featurise(df: pd.DataFrame, cache_dir: Path | None, tag: str) -> np.ndarray
     for i in range(0, len(domains), BATCH):
         parts.append(extract_features_batch(domains[i:i + BATCH]))
         done = min(i + BATCH, len(domains))
-        print(f"    featurised {done:>8,} / {len(domains):,}", end="\r")
-    print()
+        log.info(f"    featurised {done:>8,} / {len(domains):,}")
     X = np.vstack(parts)
     if cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -134,17 +136,17 @@ def main():
             sys.exit(f"Missing CSV: {p}")
 
     # ── 1. Load data ──────────────────────────────────────────────────────
-    print("Loading CSVs …")
+    log.info("Loading CSVs …")
     dfs = {k: pd.read_csv(str(p)) for k, p in csvs.items()}
     for k, df in dfs.items():
-        print(f"  {k:20s}: {len(df):>8,} rows")
+        log.info(f"  {k:20s}: {len(df):>8,} rows")
 
     # ── 2. Class label encoding (19 classes) ─────────────────────────────
     le = LabelEncoder()
     le.fit(dfs["train"]["class_label"].values)
     n_classes = len(le.classes_)
     benign_idx = int(np.where(le.classes_ == "benign")[0][0])
-    print(f"\n  {n_classes} classes: {list(le.classes_)}")
+    log.info(f"\n  {n_classes} classes: {list(le.classes_)}")
 
     y = {
         "train": le.transform(dfs["train"]["class_label"].values),
@@ -153,14 +155,14 @@ def main():
     }
 
     # ── 3. Feature extraction (uses cache if available) ───────────────────
-    print("\nExtracting features …")
+    log.info("\nExtracting features …")
     Xs = {}
     for k, df in dfs.items():
-        print(f"  [{k}]")
+        log.info(f"  [{k}]")
         Xs[k] = _featurise(df, cache_dir, k)
 
     # ── 4. Train multi-class LightGBM ────────────────────────────────────
-    print("\nTraining multi-class LightGBM …")
+    log.info("\nTraining multi-class LightGBM …")
     model = lgb.LGBMClassifier(
         objective="multiclass",
         num_class=n_classes,
@@ -182,7 +184,7 @@ def main():
         ],
     )
     best_iter = model.best_iteration_
-    print(f"  Best iteration: {best_iter}")
+    log.info(f"  Best iteration: {best_iter}")
 
     model.booster_.save_model(str(out_dir / "model.txt"))
 
@@ -191,14 +193,14 @@ def main():
         "importance": model.feature_importances_,
     }).sort_values("importance", ascending=False)
     imp.to_csv(str(out_dir / "feature_importance.csv"), index=False)
-    print("\n  Top-10 features:")
-    print(imp.head(10).to_string(index=False))
+    log.info("\n  Top-10 features:")
+    log.info(imp.head(10).to_string(index=False))
 
     # ── 5. Classification accuracy ────────────────────────────────────────
     results = {}
-    print("\n" + "=" * 65)
-    print("  Classification Results")
-    print("=" * 65)
+    log.info("\n" + "=" * 65)
+    log.info("  Classification Results")
+    log.info("=" * 65)
     for split in ["val", "test_known"]:
         proba = model.predict_proba(Xs[split])
         y_pred_mc = proba.argmax(axis=1)
@@ -210,7 +212,7 @@ def main():
         bin_acc = accuracy_score(y_bin, y_pred_bin)
         bin_f1 = f1_score(y_bin, y_pred_bin)
         bin_auc = roc_auc_score(y_bin, p_dga)
-        print(f"  [{split}]  MC-acc={mc_acc:.4f}  Bin-acc={bin_acc:.4f}"
+        log.info(f"  [{split}]  MC-acc={mc_acc:.4f}  Bin-acc={bin_acc:.4f}"
               f"  F1={bin_f1:.4f}  AUC={bin_auc:.4f}")
         results[f"cls_{split}"] = {
             "mc_accuracy": float(mc_acc),
@@ -220,20 +222,20 @@ def main():
         }
 
     # ── 6. Build KNN index ────────────────────────────────────────────────
-    print(f"\nBuilding KNN index (k={args.knn_k}, subsample={args.knn_subsample:,}) …")
+    log.info(f"\nBuilding KNN index (k={args.knn_k}, subsample={args.knn_subsample:,}) …")
     nn, scaler = build_knn(Xs["train"], k=args.knn_k, subsample=args.knn_subsample)
-    print("  Done.")
+    log.info("  Done.")
 
     # ── 7. Pre-compute model probabilities ───────────────────────────────
-    print("\nScoring all splits …")
+    log.info("\nScoring all splits …")
     probas = {}
     for k in ["test_known", "unknown_family", "unknown_ood"]:
         probas[k] = model.predict_proba(Xs[k])
 
     # ── 8. OOD evaluation ────────────────────────────────────────────────
-    print("\n" + "=" * 65)
-    print("  OOD Detection Evaluation")
-    print("=" * 65)
+    log.info("\n" + "=" * 65)
+    log.info("  OOD Detection Evaluation")
+    log.info("=" * 65)
 
     scorer_fns = {
         "msp": lambda k: msp_score(probas[k]),
@@ -244,7 +246,7 @@ def main():
     ood_splits = ["unknown_family", "unknown_ood"]
 
     for sname, sfn in scorer_fns.items():
-        print(f"\n── {sname} ──")
+        log.info(f"\n── {sname} ──")
         id_scores = sfn("test_known")
         for split in ood_splits:
             ood_s = sfn(split)
@@ -270,21 +272,21 @@ def main():
     with open(str(out_dir / "results.json"), "w") as f:
         json.dump(results, f, indent=2, default=str)
 
-    print("\n" + "=" * 70)
-    print("  SUMMARY")
-    print("=" * 70)
+    log.info("\n" + "=" * 70)
+    log.info("  SUMMARY")
+    log.info("=" * 70)
     ck = results["cls_test_known"]
-    print(f"  Binary  (test_known): Acc={ck['bin_accuracy']:.4f}  F1={ck['bin_f1']:.4f}"
+    log.info(f"  Binary  (test_known): Acc={ck['bin_accuracy']:.4f}  F1={ck['bin_f1']:.4f}"
           f"  AUC={ck['bin_roc_auc']:.4f}")
-    print(f"  19-class(test_known): Acc={ck['mc_accuracy']:.4f}")
+    log.info(f"  19-class(test_known): Acc={ck['mc_accuracy']:.4f}")
     for sn in ["msp", "energy", "knn"]:
-        print(f"\n  OOD ({sn}):")
+        log.info(f"\n  OOD ({sn}):")
         for sl in ood_splits:
             m = results[f"ood_{sn}_{sl}"]
-            print(f"    {sl:20s}: AUROC={m['auroc']:.4f}  AUPR-OUT={m['aupr_out']:.4f}"
+            log.info(f"    {sl:20s}: AUROC={m['auroc']:.4f}  AUPR-OUT={m['aupr_out']:.4f}"
                   f"  FPR@95={m['fpr_at_tpr']:.4f}")
 
-    print(f"\nAll results → {out_dir}")
+    log.info(f"\nAll results → {out_dir}")
 
 
 if __name__ == "__main__":
