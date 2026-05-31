@@ -1032,14 +1032,7 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     os.makedirs(args.cache, exist_ok=True)
 
-    run_name_base = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    run_name = run_name_base
-    run_idx = 1
-    run_outdir = os.path.join(args.outdir, run_name)
-    while os.path.exists(run_outdir):
-        run_name = f"{run_name_base}_{run_idx:02d}"
-        run_outdir = os.path.join(args.outdir, run_name)
-        run_idx += 1
+    run_outdir = args.outdir
     os.makedirs(run_outdir, exist_ok=True)
     print(f"[RUN] output directory: {run_outdir}")
 
@@ -1303,7 +1296,7 @@ def main():
             print(msg)
 
     def save(df: pd.DataFrame, name: str, subdir: str) -> None:
-        out_subdir = os.path.join(run_outdir, subdir)
+        out_subdir = os.path.join(args.outdir, subdir)
         os.makedirs(out_subdir, exist_ok=True)
         path = os.path.join(out_subdir, name)
         df.to_csv(path, index=False)
