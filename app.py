@@ -266,7 +266,7 @@ if run_btn or domain_text:
         return "background-color:#fdebd0;color:#7d4608"  # DGA family
 
     st.dataframe(
-        df.style.applymap(_style_verdict, subset=["Verdict"]),
+        df.style.map(_style_verdict, subset=["Verdict"]),
         use_container_width=True,
         hide_index=True,
     )
