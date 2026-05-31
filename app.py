@@ -5,8 +5,10 @@ Usage:
     streamlit run app.py
 """
 
+import gzip
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -141,10 +143,23 @@ def _load_cnn():
     return _load_state(MODELS_DIR / "neural_model.pt", m)
 
 
-@st.cache_resource(show_spinner="Loading LGBM…")
+@st.cache_resource(show_spinner="Loading LGBM Binary…")
 def _load_lgbm():
     import lightgbm as lgb
     return lgb.Booster(model_file=str(MODELS_DIR / "lgbm_binary.txt"))
+
+
+@st.cache_resource(show_spinner="Loading LGBM Multiclass (decompress ~42 MB)…")
+def _load_lgbm_mc():
+    import lightgbm as lgb
+    gz_path = MODELS_DIR / "lgbm_multiclass.txt.gz"
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+        tmp_path = tmp.name
+        with gzip.open(gz_path, "rb") as gz:
+            tmp.write(gz.read())
+    booster = lgb.Booster(model_file=tmp_path)
+    Path(tmp_path).unlink(missing_ok=True)
+    return booster
 
 
 @st.cache_data(show_spinner="Loading EDA data…")
@@ -197,10 +212,33 @@ def _lgbm_predict(booster, domains):
     return rows
 
 
+def _lgbm_mc_predict(booster, domains):
+    from features import extract_features_batch
+    feats = extract_features_batch(domains)
+    probs = booster.predict(feats)          # (N, 19) softmax probabilities
+    benign_idx = _CLASSES.index("benign")
+    rows = []
+    for i, domain in enumerate(domains):
+        pred_idx = int(probs[i].argmax())
+        dga_prob = float(1.0 - probs[i, benign_idx])
+        conf = float(probs[i, pred_idx])
+        rows.append({
+            "domain": domain,
+            "predicted_class": _CLASSES[pred_idx],
+            "confidence": conf,
+            "dga_prob": dga_prob,
+            "msp_score": float(1.0 - conf),
+            "energy_score": float("nan"),
+            "probabilities": probs[i].tolist(),
+        })
+    return rows
+
+
 MODEL_OPTIONS = {
     "BiLSTM (best)": "bilstm",
     "BiLSTM + Outlier Exposure": "bilstm_oe",
     "CNN": "cnn",
+    "LGBM Multiclass (19-class)": "lgbm_mc",
     "LGBM Binary": "lgbm",
 }
 
@@ -218,6 +256,9 @@ def run_inference(model_key: str, domains: list[str]) -> list[dict]:
     if model_key == "lgbm":
         booster = _load_lgbm()
         return _lgbm_predict(booster, domains)
+    if model_key == "lgbm_mc":
+        booster = _load_lgbm_mc()
+        return _lgbm_mc_predict(booster, domains)
     raise ValueError(model_key)
 
 
@@ -317,7 +358,7 @@ with tab_detect:
             st.divider()
             st.subheader(f"Results — {len(results)} domain(s)  ·  model: **{selected_model_label}**")
 
-            is_lgbm = selected_model_key == "lgbm"
+            is_lgbm = selected_model_key in ("lgbm", "lgbm_mc")
             table_rows = []
             for r in results:
                 verdict, _ = _verdict(r, ood_threshold)
@@ -339,7 +380,8 @@ with tab_detect:
                 use_container_width=True, hide_index=True,
             )
 
-            if not is_lgbm and (
+            show_charts = selected_model_key in ("bilstm", "bilstm_oe", "cnn", "lgbm_mc")
+            if show_charts and (
                 len(results) == 1 or st.checkbox("Show probability charts", value=len(results) <= 5)
             ):
                 for r in results:
