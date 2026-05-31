@@ -78,7 +78,8 @@ class DomainBiLSTM(nn.Module):
         fwd = out[torch.arange(B, device=out.device), idx, :H]
         bwd = out[:, 0, H:]
         pooled = self.drop(torch.cat([fwd, bwd], dim=-1))
-        return self.head(pooled), pooled
+        feat = self.pre(pooled)
+        return self.head(feat), feat
 
 
 class DomainCNN(nn.Module):
