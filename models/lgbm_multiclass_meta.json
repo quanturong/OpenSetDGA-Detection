@@ -1,0 +1,112 @@
+{
+  "cls_val": {
+    "mc_accuracy": 0.77335,
+    "bin_accuracy": 0.832,
+    "bin_f1": 0.8519497686715135,
+    "bin_roc_auc": 0.9672748078492314
+  },
+  "cls_test_known": {
+    "mc_accuracy": 0.7747,
+    "bin_accuracy": 0.8345,
+    "bin_f1": 0.8542363924608067,
+    "bin_roc_auc": 0.9690060104802833
+  },
+  "ood_msp_unknown_family": {
+    "auroc": 0.578935731,
+    "aupr_out": 0.6170684769394003,
+    "aupr_in": 0.5776092250146168,
+    "fpr_at_tpr": 0.8107,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.5942848563707337
+  },
+  "ood_msp_unknown_ood": {
+    "auroc": 0.547512108,
+    "aupr_out": 0.7351552024995504,
+    "aupr_in": 0.3556388178801708,
+    "fpr_at_tpr": 0.9077,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.7234898102171993
+  },
+  "ood_energy_unknown_family": {
+    "auroc": 0.49983555449999995,
+    "aupr_out": 0.5599572683398766,
+    "aupr_in": 0.44155361821427275,
+    "fpr_at_tpr": 0.991025,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.99024,
+    "precision_at_tpr": 0.5553598869359416
+  },
+  "ood_energy_unknown_ood": {
+    "auroc": 0.499778182125,
+    "aupr_out": 0.7195696467031345,
+    "aupr_in": 0.28255415117092864,
+    "fpr_at_tpr": 0.991025,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.98815,
+    "precision_at_tpr": 0.7136924365863524
+  },
+  "ood_knn_unknown_family": {
+    "auroc": 0.549593267,
+    "aupr_out": 0.6413216218341447,
+    "aupr_in": 0.4600539855764523,
+    "fpr_at_tpr": 0.962675,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.5522806283209506
+  },
+  "ood_knn_unknown_ood": {
+    "auroc": 0.57322311525,
+    "aupr_out": 0.7887965233114989,
+    "aupr_in": 0.31930448839248443,
+    "fpr_at_tpr": 0.945675,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.7152160328848803
+  },
+  "params": {
+    "run_dir": "../data/processed",
+    "out_dir": null,
+    "n_estimators": 800,
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "energy_T": 1.0,
+    "knn_k": 5,
+    "knn_subsample": 50000,
+    "no_cache": false
+  },
+  "best_iteration": 800,
+  "n_classes": 19,
+  "classes": [
+    "benign",
+    "conficker",
+    "cryptolocker",
+    "dircrypt",
+    "emotet",
+    "gozi",
+    "kraken",
+    "matsnu",
+    "murofet",
+    "necurs",
+    "nymaim",
+    "padcrypt",
+    "pykspa",
+    "ramdo",
+    "ramnit",
+    "rovnix",
+    "simda",
+    "suppobox",
+    "tinba"
+  ],
+  "cls_detailed": {
+    "bin_accuracy": 0.622575,
+    "bin_precision": 0.9775943396226415,
+    "bin_recall": 0.24923585709274942,
+    "bin_f1": 0.39720503094430026,
+    "mc_accuracy": 0.6048,
+    "mc_precision_macro": 0.671501840037164,
+    "mc_recall_macro": 0.2531793677130045,
+    "mc_f1_macro": 0.30168174119380603
+  }
+}

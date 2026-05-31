@@ -1,0 +1,87 @@
+{
+  "cls_test_known": {
+    "mc_accuracy": 0.928375,
+    "bin_accuracy": 0.970125,
+    "bin_f1": 0.9695905539863093,
+    "bin_roc_auc": 0.9963717969786315
+  },
+  "ood_msp_unknown_family": {
+    "auroc": 0.6911634862499999,
+    "aupr_out": 0.7167397475025242,
+    "aupr_in": 0.6446494875419531,
+    "fpr_at_tpr": 0.798825,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95034,
+    "precision_at_tpr": 0.5979237448093621
+  },
+  "ood_msp_unknown_ood": {
+    "auroc": 0.44998800675,
+    "aupr_out": 0.6762166043635879,
+    "aupr_in": 0.2542264490789904,
+    "fpr_at_tpr": 1.0,
+    "tpr_target": 0.95,
+    "realized_tpr": 1.0,
+    "precision_at_tpr": 0.7142857142857143
+  },
+  "ood_mahalanobis_unknown_family": {
+    "auroc": 0.5070882612500001,
+    "aupr_out": 0.5867861771172789,
+    "aupr_in": 0.45230448751532104,
+    "fpr_at_tpr": 0.9387,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.5585081365816951
+  },
+  "ood_mahalanobis_unknown_ood": {
+    "auroc": 0.536034493,
+    "aupr_out": 0.7549274829928163,
+    "aupr_in": 0.31720354193303385,
+    "fpr_at_tpr": 0.928325,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.7189725503848395
+  },
+  "params": {
+    "run_dir": "../data/processed",
+    "out_dir": null,
+    "epochs": 30,
+    "batch": 512,
+    "lr": 0.001,
+    "embed_dim": 32,
+    "feat_dim": 128,
+    "patience": 5,
+    "device": "cpu"
+  },
+  "n_classes": 19,
+  "classes": [
+    "benign",
+    "conficker",
+    "cryptolocker",
+    "dircrypt",
+    "emotet",
+    "gozi",
+    "kraken",
+    "matsnu",
+    "murofet",
+    "necurs",
+    "nymaim",
+    "padcrypt",
+    "pykspa",
+    "ramdo",
+    "ramnit",
+    "rovnix",
+    "simda",
+    "suppobox",
+    "tinba"
+  ],
+  "cls_detailed": {
+    "bin_accuracy": 0.969075,
+    "bin_precision": 0.9860822600747818,
+    "bin_recall": 0.9514456080573233,
+    "bin_f1": 0.9684543391222299,
+    "mc_accuracy": 0.928375,
+    "mc_precision_macro": 0.9070574080399033,
+    "mc_recall_macro": 0.8704073222349756,
+    "mc_f1_macro": 0.8863862977244894
+  }
+}
