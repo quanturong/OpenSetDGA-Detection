@@ -76,5 +76,15 @@
     "energy_T": 1.0,
     "knn_k": 5,
     "device": "cpu"
+  },
+  "cls_detailed": {
+    "bin_accuracy": 0.97035,
+    "bin_precision": 0.9788276108361819,
+    "bin_recall": 0.9613669389186752,
+    "bin_f1": 0.9700187067091359,
+    "mc_accuracy": 0.934525,
+    "mc_precision_macro": 0.9173838108205229,
+    "mc_recall_macro": 0.8885108307965552,
+    "mc_f1_macro": 0.8967943321444785
   }
 }

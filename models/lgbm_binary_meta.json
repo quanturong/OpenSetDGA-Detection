@@ -52,5 +52,15 @@
     "no_cache": false
   },
   "best_iteration": 1000,
-  "n_features": 38
+  "n_features": 38,
+  "cls_detailed": {
+    "bin_accuracy": 0.780575,
+    "bin_precision": 0.9333333333333333,
+    "bin_recall": 0.6032970887407927,
+    "bin_f1": 0.7328727516206592,
+    "mc_accuracy": 0.479575,
+    "mc_precision_macro": 0.0353929889298893,
+    "mc_recall_macro": 0.04785461258294667,
+    "mc_f1_macro": 0.040691088814882384
+  }
 }

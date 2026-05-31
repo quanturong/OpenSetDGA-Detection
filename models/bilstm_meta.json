@@ -95,5 +95,15 @@
     "simda",
     "suppobox",
     "tinba"
-  ]
+  ],
+  "cls_detailed": {
+    "bin_accuracy": 0.97615,
+    "bin_precision": 0.9771026864172734,
+    "bin_recall": 0.9750463496517513,
+    "bin_f1": 0.9760734349919743,
+    "mc_accuracy": 0.940875,
+    "mc_precision_macro": 0.9204510757609746,
+    "mc_recall_macro": 0.9034013931602606,
+    "mc_f1_macro": 0.9052761467254011
+  }
 }

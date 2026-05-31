@@ -413,7 +413,7 @@ with tab_detect:
 
 with tab_compare:
     st.subheader("Model performance comparison")
-    st.caption("Evaluated on held-out test sets · OOD: unknown_family split")
+    st.caption("Evaluated on test_known (40,000 domains) · threshold = 0.5 · OOD: unknown_family split")
 
     def _read_meta(fname):
         path = MODELS_DIR / fname
@@ -422,11 +422,11 @@ with tab_compare:
                 return json.load(f)
         return {}
 
-    bilstm_m   = _read_meta("bilstm_meta.json")
-    cnn_m      = _read_meta("neural_meta.json")
+    bilstm_m    = _read_meta("bilstm_meta.json")
+    cnn_m       = _read_meta("neural_meta.json")
     bilstm_oe_m = _read_meta("bilstm_oe_meta.json")
-    lgbm_m     = _read_meta("lgbm_binary_meta.json")
-    lgbm_mc_m  = _read_meta("lgbm_multiclass_meta.json")
+    lgbm_m      = _read_meta("lgbm_binary_meta.json")
+    lgbm_mc_m   = _read_meta("lgbm_multiclass_meta.json")
 
     def _g(d, *keys, default=None):
         for k in keys:
@@ -436,69 +436,97 @@ with tab_compare:
                 return default
         return d if d != {} else default
 
-    rows_cls = [
-        {"Model": "LGBM Binary",
-         "Binary Acc": _g(lgbm_m, "binary_test_known", "accuracy"),
-         "Binary F1":  _g(lgbm_m, "binary_test_known", "f1"),
-         "Binary AUC": _g(lgbm_m, "binary_test_known", "roc_auc"),
-         "MC Acc": "—"},
-        {"Model": "LGBM Multiclass",
-         "Binary Acc": _g(lgbm_mc_m, "cls_test_known", "bin_accuracy"),
-         "Binary F1":  _g(lgbm_mc_m, "cls_test_known", "bin_f1"),
-         "Binary AUC": _g(lgbm_mc_m, "cls_test_known", "bin_roc_auc"),
-         "MC Acc": _g(lgbm_mc_m, "cls_test_known", "mc_accuracy")},
-        {"Model": "CNN",
-         "Binary Acc": _g(cnn_m, "cls_test_known", "bin_accuracy"),
-         "Binary F1":  _g(cnn_m, "cls_test_known", "bin_f1"),
-         "Binary AUC": _g(cnn_m, "cls_test_known", "bin_roc_auc"),
-         "MC Acc": _g(cnn_m, "cls_test_known", "mc_accuracy")},
-        {"Model": "BiLSTM",
-         "Binary Acc": _g(bilstm_m, "cls_test_known", "bin_accuracy"),
-         "Binary F1":  _g(bilstm_m, "cls_test_known", "bin_f1"),
-         "Binary AUC": _g(bilstm_m, "cls_test_known", "bin_roc_auc"),
-         "MC Acc": _g(bilstm_m, "cls_test_known", "mc_accuracy")},
-        {"Model": "BiLSTM + OE",
-         "Binary Acc": _g(bilstm_oe_m, "cls", "bin_accuracy"),
-         "Binary F1":  _g(bilstm_oe_m, "cls", "bin_f1"),
-         "Binary AUC": _g(bilstm_oe_m, "cls", "bin_roc_auc"),
-         "MC Acc": _g(bilstm_oe_m, "cls", "mc_accuracy")},
-    ]
-
     def _fmt(v):
         if v is None or v == "—":
             return "—"
-        return f"{v:.4f}"
+        try:
+            return f"{float(v):.4f}"
+        except (TypeError, ValueError):
+            return str(v)
 
-    df_cls = pd.DataFrame(rows_cls)
-    for col in ["Binary Acc", "Binary F1", "Binary AUC", "MC Acc"]:
-        df_cls[col] = df_cls[col].apply(_fmt)
-    st.markdown("#### Classification metrics (test_known)")
-    st.dataframe(df_cls, use_container_width=True, hide_index=True)
+    # ── 1. Binary classification (benign vs DGA) ──────────────────────────
+    st.markdown("#### Binary classification — benign vs DGA (test_known)")
 
-    # OOD metrics (unknown_family, best scorer per model)
+    rows_bin = [
+        {"Model": "LGBM Binary",
+         "Accuracy":  _g(lgbm_m,     "cls_detailed", "bin_accuracy"),
+         "Precision": _g(lgbm_m,     "cls_detailed", "bin_precision"),
+         "Recall":    _g(lgbm_m,     "cls_detailed", "bin_recall"),
+         "F1":        _g(lgbm_m,     "cls_detailed", "bin_f1"),
+         "AUC":       _g(lgbm_m,     "binary_test_known", "roc_auc")},
+        {"Model": "LGBM Multiclass",
+         "Accuracy":  _g(lgbm_mc_m,  "cls_detailed", "bin_accuracy"),
+         "Precision": _g(lgbm_mc_m,  "cls_detailed", "bin_precision"),
+         "Recall":    _g(lgbm_mc_m,  "cls_detailed", "bin_recall"),
+         "F1":        _g(lgbm_mc_m,  "cls_detailed", "bin_f1"),
+         "AUC":       _g(lgbm_mc_m,  "cls_test_known", "bin_roc_auc")},
+        {"Model": "CNN",
+         "Accuracy":  _g(cnn_m,      "cls_detailed", "bin_accuracy"),
+         "Precision": _g(cnn_m,      "cls_detailed", "bin_precision"),
+         "Recall":    _g(cnn_m,      "cls_detailed", "bin_recall"),
+         "F1":        _g(cnn_m,      "cls_detailed", "bin_f1"),
+         "AUC":       _g(cnn_m,      "cls_test_known", "bin_roc_auc")},
+        {"Model": "BiLSTM",
+         "Accuracy":  _g(bilstm_m,   "cls_detailed", "bin_accuracy"),
+         "Precision": _g(bilstm_m,   "cls_detailed", "bin_precision"),
+         "Recall":    _g(bilstm_m,   "cls_detailed", "bin_recall"),
+         "F1":        _g(bilstm_m,   "cls_detailed", "bin_f1"),
+         "AUC":       _g(bilstm_m,   "cls_test_known", "bin_roc_auc")},
+        {"Model": "BiLSTM + OE",
+         "Accuracy":  _g(bilstm_oe_m,"cls_detailed", "bin_accuracy"),
+         "Precision": _g(bilstm_oe_m,"cls_detailed", "bin_precision"),
+         "Recall":    _g(bilstm_oe_m,"cls_detailed", "bin_recall"),
+         "F1":        _g(bilstm_oe_m,"cls_detailed", "bin_f1"),
+         "AUC":       _g(bilstm_oe_m,"cls", "bin_roc_auc")},
+    ]
+    df_bin = pd.DataFrame(rows_bin)
+    for col in ["Accuracy", "Precision", "Recall", "F1", "AUC"]:
+        df_bin[col] = df_bin[col].apply(_fmt)
+    st.dataframe(df_bin, use_container_width=True, hide_index=True)
+
+    # bar charts for Precision / Recall / F1
+    metric_chart = st.selectbox("Visualise metric", ["F1", "Precision", "Recall", "Accuracy", "AUC"], key="bin_metric")
+    chart_data = df_bin.set_index("Model")[metric_chart].apply(
+        lambda x: float(x) if x != "—" else None
+    ).dropna().sort_values(ascending=False)
+    st.bar_chart(chart_data.rename(metric_chart), height=240)
+
+    # ── 2. Multiclass classification ──────────────────────────────────────
+    st.markdown("#### Multiclass classification — 19 classes (macro-averaged)")
+
+    rows_mc = [
+        {"Model": "LGBM Binary",    "MC Accuracy": "—",                                            "Macro Precision": "—",                                                 "Macro Recall": "—",                                               "Macro F1": "—"},
+        {"Model": "LGBM Multiclass","MC Accuracy": _g(lgbm_mc_m, "cls_detailed","mc_accuracy"),    "Macro Precision": _g(lgbm_mc_m,"cls_detailed","mc_precision_macro"),   "Macro Recall": _g(lgbm_mc_m,"cls_detailed","mc_recall_macro"),    "Macro F1": _g(lgbm_mc_m,"cls_detailed","mc_f1_macro")},
+        {"Model": "CNN",            "MC Accuracy": _g(cnn_m,     "cls_detailed","mc_accuracy"),    "Macro Precision": _g(cnn_m,    "cls_detailed","mc_precision_macro"),   "Macro Recall": _g(cnn_m,    "cls_detailed","mc_recall_macro"),    "Macro F1": _g(cnn_m,    "cls_detailed","mc_f1_macro")},
+        {"Model": "BiLSTM",         "MC Accuracy": _g(bilstm_m,  "cls_detailed","mc_accuracy"),    "Macro Precision": _g(bilstm_m, "cls_detailed","mc_precision_macro"),   "Macro Recall": _g(bilstm_m, "cls_detailed","mc_recall_macro"),    "Macro F1": _g(bilstm_m, "cls_detailed","mc_f1_macro")},
+        {"Model": "BiLSTM + OE",    "MC Accuracy": _g(bilstm_oe_m,"cls_detailed","mc_accuracy"),   "Macro Precision": _g(bilstm_oe_m,"cls_detailed","mc_precision_macro"), "Macro Recall": _g(bilstm_oe_m,"cls_detailed","mc_recall_macro"),  "Macro F1": _g(bilstm_oe_m,"cls_detailed","mc_f1_macro")},
+    ]
+    df_mc = pd.DataFrame(rows_mc)
+    for col in ["MC Accuracy", "Macro Precision", "Macro Recall", "Macro F1"]:
+        df_mc[col] = df_mc[col].apply(_fmt)
+    st.dataframe(df_mc, use_container_width=True, hide_index=True)
+
+    # ── 3. OOD detection ──────────────────────────────────────────────────
+    st.markdown("#### OOD detection — unknown_family (best scorer per model)")
+    st.caption("AUPR-out = precision-recall AUC treating OOD as positive · Precision@TPR95 = precision when recall=95%")
+
     rows_ood = [
-        {"Model": "LGBM Binary",    "Scorer": "MSP",      "AUROC": _g(lgbm_m,      "ood_msp_unknown_family",         "auroc"),  "FPR@95TPR": _g(lgbm_m,      "ood_msp_unknown_family",         "fpr_at_tpr")},
-        {"Model": "LGBM Multiclass","Scorer": "MSP",      "AUROC": _g(lgbm_mc_m,   "ood_msp_unknown_family",         "auroc"),  "FPR@95TPR": _g(lgbm_mc_m,   "ood_msp_unknown_family",         "fpr_at_tpr")},
-        {"Model": "CNN",            "Scorer": "MSP",      "AUROC": _g(cnn_m,        "ood_msp_unknown_family",         "auroc"),  "FPR@95TPR": _g(cnn_m,        "ood_msp_unknown_family",         "fpr_at_tpr")},
-        {"Model": "BiLSTM",         "Scorer": "Energy",   "AUROC": _g(bilstm_m,     "ood_energy_unknown_family",      "auroc"),  "FPR@95TPR": _g(bilstm_m,     "ood_energy_unknown_family",      "fpr_at_tpr")},
-        {"Model": "BiLSTM + OE",    "Scorer": "Energy",   "AUROC": _g(bilstm_oe_m,  "ood_energy_unknown_family",      "auroc"),  "FPR@95TPR": _g(bilstm_oe_m,  "ood_energy_unknown_family",      "fpr_at_tpr")},
+        {"Model": "LGBM Binary",    "Scorer": "MSP",    "AUROC": _g(lgbm_m,      "ood_msp_unknown_family",    "auroc"), "AUPR-out": _g(lgbm_m,     "ood_msp_unknown_family","aupr_out"), "FPR@95TPR": _g(lgbm_m,     "ood_msp_unknown_family","fpr_at_tpr"), "Prec@TPR95": _g(lgbm_m,    "ood_msp_unknown_family","precision_at_tpr")},
+        {"Model": "LGBM Multiclass","Scorer": "MSP",    "AUROC": _g(lgbm_mc_m,   "ood_msp_unknown_family",    "auroc"), "AUPR-out": _g(lgbm_mc_m,  "ood_msp_unknown_family","aupr_out"), "FPR@95TPR": _g(lgbm_mc_m,  "ood_msp_unknown_family","fpr_at_tpr"), "Prec@TPR95": _g(lgbm_mc_m, "ood_msp_unknown_family","precision_at_tpr")},
+        {"Model": "CNN",            "Scorer": "MSP",    "AUROC": _g(cnn_m,        "ood_msp_unknown_family",    "auroc"), "AUPR-out": _g(cnn_m,      "ood_msp_unknown_family","aupr_out"), "FPR@95TPR": _g(cnn_m,      "ood_msp_unknown_family","fpr_at_tpr"), "Prec@TPR95": _g(cnn_m,     "ood_msp_unknown_family","precision_at_tpr")},
+        {"Model": "BiLSTM",         "Scorer": "Energy", "AUROC": _g(bilstm_m,     "ood_energy_unknown_family", "auroc"), "AUPR-out": _g(bilstm_m,   "ood_energy_unknown_family","aupr_out"), "FPR@95TPR": _g(bilstm_m,   "ood_energy_unknown_family","fpr_at_tpr"), "Prec@TPR95": _g(bilstm_m,  "ood_energy_unknown_family","precision_at_tpr")},
+        {"Model": "BiLSTM + OE",    "Scorer": "Energy", "AUROC": _g(bilstm_oe_m,  "ood_energy_unknown_family", "auroc"), "AUPR-out": _g(bilstm_oe_m,"ood_energy_unknown_family","aupr_out"), "FPR@95TPR": _g(bilstm_oe_m,"ood_energy_unknown_family","fpr_at_tpr"), "Prec@TPR95": _g(bilstm_oe_m,"ood_energy_unknown_family","precision_at_tpr")},
     ]
     df_ood = pd.DataFrame(rows_ood)
-    for col in ["AUROC", "FPR@95TPR"]:
+    for col in ["AUROC", "AUPR-out", "FPR@95TPR", "Prec@TPR95"]:
         df_ood[col] = df_ood[col].apply(_fmt)
-    st.markdown("#### OOD detection — unknown_family (best scorer per model)")
     st.dataframe(df_ood, use_container_width=True, hide_index=True)
 
-    # AUROC bar chart
-    auroc_vals = {r["Model"]: _g(bilstm_m, "ood_energy_unknown_family", "auroc") if r["Model"] == "BiLSTM"
-                  else (_g(bilstm_oe_m, "ood_energy_unknown_family", "auroc") if r["Model"] == "BiLSTM + OE"
-                  else (_g(lgbm_m, "ood_msp_unknown_family", "auroc") if r["Model"] == "LGBM Binary"
-                  else (_g(lgbm_mc_m, "ood_msp_unknown_family", "auroc") if r["Model"] == "LGBM Multiclass"
-                  else _g(cnn_m, "ood_msp_unknown_family", "auroc"))))
-                  for r in rows_ood}
-    auroc_df = pd.Series({k: v for k, v in auroc_vals.items() if v is not None}).sort_values(ascending=False)
-    st.markdown("**AUROC comparison (unknown_family)**")
-    st.bar_chart(auroc_df.rename("AUROC"), height=260)
+    auroc_series = pd.Series({
+        r["Model"]: float(r["AUROC"]) for r in rows_ood if r["AUROC"] != "—"
+    }).sort_values(ascending=False)
+    st.markdown("**AUROC (unknown_family)**")
+    st.bar_chart(auroc_series.rename("AUROC"), height=240)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
