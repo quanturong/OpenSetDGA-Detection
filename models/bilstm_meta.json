@@ -1,0 +1,99 @@
+{
+  "cls_test_known": {
+    "mc_accuracy": 0.940875,
+    "bin_accuracy": 0.976075,
+    "bin_f1": 0.9760336580601537,
+    "bin_roc_auc": 0.9968461316712436
+  },
+  "ood_msp_unknown_family": {
+    "auroc": 0.694723347,
+    "aupr_out": 0.7176892429892173,
+    "aupr_in": 0.6534090235897909,
+    "fpr_at_tpr": 0.7899,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.6005360574491757
+  },
+  "ood_msp_unknown_ood": {
+    "auroc": 0.49251928937499995,
+    "aupr_out": 0.7064565569893969,
+    "aupr_in": 0.27292833307723097,
+    "fpr_at_tpr": 0.980125,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.9573,
+    "precision_at_tpr": 0.7094526994478824
+  },
+  "ood_energy_unknown_family": {
+    "auroc": 0.8606933537500001,
+    "aupr_out": 0.8610428760049748,
+    "aupr_in": 0.8595642738527309,
+    "fpr_at_tpr": 0.4582,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.721577444248648
+  },
+  "ood_energy_unknown_ood": {
+    "auroc": 0.587607323125,
+    "aupr_out": 0.776656440296362,
+    "aupr_in": 0.35423075086060696,
+    "fpr_at_tpr": 0.921275,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.7205102729596287
+  },
+  "ood_mahalanobis_unknown_family": {
+    "auroc": 0.59589906025,
+    "aupr_out": 0.6653798496105582,
+    "aupr_in": 0.5402940307780323,
+    "fpr_at_tpr": 0.8855,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.5728412928123493
+  },
+  "ood_mahalanobis_unknown_ood": {
+    "auroc": 0.53652848675,
+    "aupr_out": 0.7337761342264675,
+    "aupr_in": 0.3292281978074583,
+    "fpr_at_tpr": 0.924725,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.7197569494427566
+  },
+  "params": {
+    "run_dir": "../data/processed",
+    "out_dir": null,
+    "epochs": 30,
+    "batch": 512,
+    "lr": 0.001,
+    "embed_dim": 32,
+    "hidden_dim": 64,
+    "num_layers": 1,
+    "feat_dim": 128,
+    "dropout": 0.2,
+    "patience": 5,
+    "energy_T": 1.0,
+    "device": "cpu"
+  },
+  "n_classes": 19,
+  "classes": [
+    "benign",
+    "conficker",
+    "cryptolocker",
+    "dircrypt",
+    "emotet",
+    "gozi",
+    "kraken",
+    "matsnu",
+    "murofet",
+    "necurs",
+    "nymaim",
+    "padcrypt",
+    "pykspa",
+    "ramdo",
+    "ramnit",
+    "rovnix",
+    "simda",
+    "suppobox",
+    "tinba"
+  ]
+}
