@@ -1,0 +1,56 @@
+{
+  "binary_val": {
+    "accuracy": 0.90545,
+    "f1": 0.9027463484879654,
+    "roc_auc": 0.9681186324745301
+  },
+  "binary_test_known": {
+    "accuracy": 0.909,
+    "f1": 0.9067431850789096,
+    "roc_auc": 0.9692264614993182
+  },
+  "ood_msp_unknown_family": {
+    "auroc": 0.45703664075,
+    "aupr_out": 0.5062771688589132,
+    "aupr_in": 0.4705013322003608,
+    "fpr_at_tpr": 0.9029,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95
+  },
+  "ood_msp_unknown_ood": {
+    "auroc": 0.5633951675,
+    "aupr_out": 0.7522261421488913,
+    "aupr_in": 0.3073706671302169,
+    "fpr_at_tpr": 0.976975,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95
+  },
+  "ood_energy_unknown_family": {
+    "auroc": 0.4992075,
+    "aupr_out": 0.35399719976001354,
+    "aupr_in": 0.9827954338523331,
+    "fpr_at_tpr": 1.0,
+    "tpr_target": 0.95,
+    "realized_tpr": 1.0
+  },
+  "ood_energy_unknown_ood": {
+    "auroc": 0.5014125,
+    "aupr_out": 0.5080446503686075,
+    "aupr_in": 0.9814613623258395,
+    "fpr_at_tpr": 1.0,
+    "tpr_target": 0.95,
+    "realized_tpr": 1.0
+  },
+  "params": {
+    "run_dir": "../data/processed",
+    "out_dir": null,
+    "n_estimators": 1000,
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "max_depth": -1,
+    "energy_T": 1.0,
+    "no_cache": false
+  },
+  "best_iteration": 1000,
+  "n_features": 38
+}

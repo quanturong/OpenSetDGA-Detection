@@ -6,6 +6,7 @@ Usage:
 """
 
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -16,16 +17,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT / "src"))
 
-BILSTM_MODEL_PATH = ROOT / "models" / "bilstm_model.pt"
-BILSTM_META_PATH = ROOT / "models" / "bilstm_meta.json"
+MODELS_DIR = ROOT / "models"
 EDA_DATA_PATH = ROOT / "data" / "eda" / "sample_features.csv"
+
+_CLASSES = [
+    "benign", "conficker", "cryptolocker", "dircrypt", "emotet", "gozi",
+    "kraken", "matsnu", "murofet", "necurs", "nymaim", "padcrypt",
+    "pykspa", "ramdo", "ramnit", "rovnix", "simda", "suppobox", "tinba",
+]
+N_CLASSES = len(_CLASSES)
 
 # ── tokenization ──────────────────────────────────────────────────────────────
 
 _CHARS = "abcdefghijklmnopqrstuvwxyz0123456789-."
 _CHAR2IDX = {c: i + 2 for i, c in enumerate(_CHARS)}
-VOCAB_SIZE = len(_CHARS) + 2  # 0=PAD, 1=UNK
+VOCAB_SIZE = len(_CHARS) + 2
 MAX_LEN = 75
 
 
@@ -38,7 +46,7 @@ def tokenize_batch(domains: list[str], max_len: int = MAX_LEN) -> np.ndarray:
     return out
 
 
-# ── model ─────────────────────────────────────────────────────────────────────
+# ── neural model definitions ──────────────────────────────────────────────────
 
 class DomainBiLSTM(nn.Module):
     def __init__(self, vocab_size, embed_dim, n_classes, hidden_dim=128,
@@ -47,8 +55,7 @@ class DomainBiLSTM(nn.Module):
         self.embed = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
         self.lstm = nn.LSTM(
             input_size=embed_dim, hidden_size=hidden_dim,
-            num_layers=num_layers, batch_first=True,
-            bidirectional=True,
+            num_layers=num_layers, batch_first=True, bidirectional=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
         self.drop = nn.Dropout(dropout)
@@ -69,30 +76,75 @@ class DomainBiLSTM(nn.Module):
         fwd = out[torch.arange(B, device=out.device), idx, :H]
         bwd = out[:, 0, H:]
         pooled = self.drop(torch.cat([fwd, bwd], dim=-1))
-        feat = self.pre(pooled)
+        return self.head(pooled), pooled
+
+
+class DomainCNN(nn.Module):
+    def __init__(self, vocab_size, embed_dim, n_classes, feat_dim=128):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.conv1 = nn.Sequential(
+            nn.Conv1d(embed_dim, 128, 3, padding=1),
+            nn.BatchNorm1d(128), nn.ReLU(), nn.MaxPool1d(2),
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv1d(128, 256, 3, padding=1),
+            nn.BatchNorm1d(256), nn.ReLU(), nn.MaxPool1d(2),
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv1d(256, 256, 3, padding=1),
+            nn.BatchNorm1d(256), nn.ReLU(),
+        )
+        self.pool = nn.AdaptiveMaxPool1d(1)
+        self.pre = nn.Sequential(nn.Linear(256, feat_dim), nn.ReLU())
+        self.head = nn.Linear(feat_dim, n_classes)
+
+    def forward(self, x):
+        e = self.embed(x).permute(0, 2, 1)
+        h = self.conv3(self.conv2(self.conv1(e)))
+        feat = self.pre(self.pool(h).squeeze(-1))
         return self.head(feat), feat
 
 
-# ── loaders (cached) ──────────────────────────────────────────────────────────
+# ── model loaders (cached) ────────────────────────────────────────────────────
 
-@st.cache_resource(show_spinner="Loading model…")
-def load_model():
-    with open(BILSTM_META_PATH) as f:
-        meta = json.load(f)
-    p = meta["params"]
-    model = DomainBiLSTM(
-        vocab_size=VOCAB_SIZE,
-        embed_dim=p["embed_dim"],
-        n_classes=meta["n_classes"],
-        hidden_dim=p["hidden_dim"],
-        num_layers=p["num_layers"],
-        feat_dim=p["feat_dim"],
-        dropout=p["dropout"],
-    )
-    state = torch.load(BILSTM_MODEL_PATH, map_location="cpu", weights_only=True)
+def _load_state(path, model):
+    state = torch.load(path, map_location="cpu", weights_only=True)
     model.load_state_dict(state)
     model.eval()
-    return model, meta["classes"], float(p["energy_T"])
+    return model
+
+
+@st.cache_resource(show_spinner="Loading BiLSTM…")
+def _load_bilstm():
+    with open(MODELS_DIR / "bilstm_meta.json") as f:
+        p = json.load(f)["params"]
+    m = DomainBiLSTM(VOCAB_SIZE, p["embed_dim"], N_CLASSES,
+                     p["hidden_dim"], p["num_layers"], p["feat_dim"], p["dropout"])
+    return _load_state(MODELS_DIR / "bilstm_model.pt", m), float(p["energy_T"])
+
+
+@st.cache_resource(show_spinner="Loading BiLSTM-OE…")
+def _load_bilstm_oe():
+    with open(MODELS_DIR / "bilstm_oe_meta.json") as f:
+        p = json.load(f)["params"]
+    m = DomainBiLSTM(VOCAB_SIZE, p["embed_dim"], N_CLASSES,
+                     p["hidden_dim"], p["num_layers"], p["feat_dim"], p["dropout"])
+    return _load_state(MODELS_DIR / "bilstm_oe_model.pt", m), float(p["energy_T"])
+
+
+@st.cache_resource(show_spinner="Loading CNN…")
+def _load_cnn():
+    with open(MODELS_DIR / "neural_meta.json") as f:
+        p = json.load(f)["params"]
+    m = DomainCNN(VOCAB_SIZE, p["embed_dim"], N_CLASSES, p["feat_dim"])
+    return _load_state(MODELS_DIR / "neural_model.pt", m)
+
+
+@st.cache_resource(show_spinner="Loading LGBM…")
+def _load_lgbm():
+    import lightgbm as lgb
+    return lgb.Booster(model_file=str(MODELS_DIR / "lgbm_binary.txt"))
 
 
 @st.cache_data(show_spinner="Loading EDA data…")
@@ -102,23 +154,20 @@ def load_eda_data() -> pd.DataFrame:
 
 # ── inference ─────────────────────────────────────────────────────────────────
 
-def predict(model: DomainBiLSTM, classes: list[str], energy_T: float,
-            domains: list[str]) -> list[dict]:
-    tokens = tokenize_batch(domains)
-    x = torch.tensor(tokens, dtype=torch.long)
+def _neural_predict(model, domains, energy_T=1.0):
+    x = torch.tensor(tokenize_batch(domains), dtype=torch.long)
     with torch.no_grad():
         logits, _ = model(x)
     probs = F.softmax(logits, dim=-1).numpy()
     energy = -(energy_T * torch.logsumexp(logits / energy_T, dim=-1)).numpy()
     msp = 1.0 - probs.max(axis=1)
-
-    benign_idx = classes.index("benign")
+    benign_idx = _CLASSES.index("benign")
     rows = []
     for i, domain in enumerate(domains):
         pred_idx = int(probs[i].argmax())
         rows.append({
             "domain": domain,
-            "predicted_class": classes[pred_idx],
+            "predicted_class": _CLASSES[pred_idx],
             "confidence": float(probs[i, pred_idx]),
             "dga_prob": float(1.0 - probs[i, benign_idx]),
             "msp_score": float(msp[i]),
@@ -126,6 +175,50 @@ def predict(model: DomainBiLSTM, classes: list[str], energy_T: float,
             "probabilities": probs[i].tolist(),
         })
     return rows
+
+
+def _lgbm_predict(booster, domains):
+    from features import extract_features_batch
+    feats = extract_features_batch(domains)
+    scores = booster.predict(feats)         # P(DGA)
+    rows = []
+    for i, domain in enumerate(domains):
+        dga_prob = float(scores[i])
+        pred = "DGA" if dga_prob >= 0.5 else "benign"
+        rows.append({
+            "domain": domain,
+            "predicted_class": pred,
+            "confidence": float(max(dga_prob, 1 - dga_prob)),
+            "dga_prob": dga_prob,
+            "msp_score": float(1.0 - max(dga_prob, 1 - dga_prob)),
+            "energy_score": float("nan"),
+            "probabilities": None,
+        })
+    return rows
+
+
+MODEL_OPTIONS = {
+    "BiLSTM (best)": "bilstm",
+    "BiLSTM + Outlier Exposure": "bilstm_oe",
+    "CNN": "cnn",
+    "LGBM Binary": "lgbm",
+}
+
+
+def run_inference(model_key: str, domains: list[str]) -> list[dict]:
+    if model_key == "bilstm":
+        model, energy_T = _load_bilstm()
+        return _neural_predict(model, domains, energy_T)
+    if model_key == "bilstm_oe":
+        model, energy_T = _load_bilstm_oe()
+        return _neural_predict(model, domains, energy_T)
+    if model_key == "cnn":
+        model = _load_cnn()
+        return _neural_predict(model, domains)
+    if model_key == "lgbm":
+        booster = _load_lgbm()
+        return _lgbm_predict(booster, domains)
+    raise ValueError(model_key)
 
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
@@ -137,24 +230,22 @@ _DGA_FAMILIES = {
 }
 
 
-def _verdict(row: dict, ood_threshold: float) -> tuple[str, str]:
-    is_ood = row["msp_score"] > ood_threshold
+def _verdict(row: dict, threshold: float) -> tuple[str, str]:
+    is_ood = row["msp_score"] > threshold
     cls = row["predicted_class"]
     if is_ood:
         return "Unknown / OOD", "#e74c3c"
-    if cls == "benign":
+    if cls in ("benign",):
         return "Benign", "#27ae60"
     return f"DGA – {cls}", "#e67e22"
 
 
-def _badge(label: str, color: str) -> str:
-    return (
-        f'<span style="background:{color};color:white;padding:3px 10px;'
-        f'border-radius:12px;font-size:0.85em;font-weight:600">{label}</span>'
-    )
+def _badge(label, color):
+    return (f'<span style="background:{color};color:white;padding:3px 10px;'
+            f'border-radius:12px;font-size:0.85em;font-weight:600">{label}</span>')
 
 
-def _style_verdict(val: str) -> str:
+def _style_verdict(val):
     if val == "Benign":
         return "background-color:#d5f5e3;color:#1a5c35"
     if val == "Unknown / OOD":
@@ -164,19 +255,14 @@ def _style_verdict(val: str) -> str:
 
 # ── page config ───────────────────────────────────────────────────────────────
 
-st.set_page_config(
-    page_title="Open-Set DGA Detection",
-    page_icon="🔍",
-    layout="wide",
-)
-
+st.set_page_config(page_title="Open-Set DGA Detection", page_icon="🔍", layout="wide")
 st.title("Open-Set DGA Detection")
 st.caption(
-    "Character-level **BiLSTM** · 19 classes (benign + 18 DGA families) · "
-    "Open-set: flags unknown DGA variants via Energy & MSP scoring"
+    "Phát hiện tên miền DGA sử dụng nhiều mô hình học sâu và cây quyết định · "
+    "Open-set: phát hiện cả DGA chưa thấy trong huấn luyện"
 )
 
-tab_detect, tab_eda = st.tabs(["Domain Detection", "EDA Dashboard"])
+tab_detect, tab_compare, tab_eda = st.tabs(["Domain Detection", "Model Comparison", "EDA Dashboard"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -184,46 +270,31 @@ tab_detect, tab_eda = st.tabs(["Domain Detection", "EDA Dashboard"])
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_detect:
-    # ── sidebar settings ──────────────────────────────────────────────────
     with st.sidebar:
         st.header("Settings")
+        selected_model_label = st.selectbox("Model", list(MODEL_OPTIONS.keys()))
+        selected_model_key = MODEL_OPTIONS[selected_model_label]
+
         ood_threshold = st.slider(
             "OOD threshold (MSP score)",
             min_value=0.10, max_value=0.90, value=0.50, step=0.05,
-            help="Domains whose MSP score exceeds this are flagged as unknown/OOD.",
+            help="Domains whose MSP score exceeds this are flagged as unknown/OOD. "
+                 "Not applicable to LGBM (binary output).",
         )
         st.divider()
-        st.subheader("Model")
-        st.markdown(
-            "**Architecture:** BiLSTM (char-level)  \n"
-            "**Hidden:** 64 · **Layers:** 1 · **Embed:** 32  \n"
-            "**Binary acc:** 97.6 %  \n"
-            "**Binary AUC:** 99.7 %  \n"
-            "**Energy AUROC (unknown):** 86.1 %"
-        )
-        st.divider()
-        st.subheader("Known DGA families")
+        st.subheader("Known DGA families (19)")
         st.markdown(", ".join(sorted(_DGA_FAMILIES)))
 
-    # ── load model ────────────────────────────────────────────────────────
-    try:
-        model, classes, energy_T = load_model()
-    except FileNotFoundError:
-        st.error("Model checkpoint not found at `models/bilstm_model.pt`.")
-        st.stop()
-
-    # ── input ─────────────────────────────────────────────────────────────
     st.subheader("Enter domain name(s)")
-    col_input, col_examples = st.columns([3, 1])
+    col_input, col_ex = st.columns([3, 1])
 
-    with col_examples:
+    with col_ex:
         st.markdown("**Quick examples**")
-        example_groups = {
+        for label, examples in {
             "Benign": ["google.com", "microsoft.com", "github.com"],
             "DGA (known)": ["iecbmjqs.com", "qnhpfstlkr.net", "tkzxymqvwj.biz"],
             "Mixed": ["amazon.com", "iecbmjqs.com", "facebook.com"],
-        }
-        for label, examples in example_groups.items():
+        }.items():
             if st.button(label, use_container_width=True):
                 st.session_state["domain_input"] = "\n".join(examples)
 
@@ -233,86 +304,162 @@ with tab_detect:
             value=st.session_state.get("domain_input", "google.com\niecbmjqs.com"),
             height=150,
             key="domain_input",
-            placeholder="e.g.\ngoogle.com\niecbmjqs.com\nmycompany.io",
         )
 
-    run_btn = st.button("Analyze", type="primary")
-
-    if run_btn or domain_text:
-        domains = [d.strip() for d in domain_text.strip().splitlines() if d.strip()]
+    if st.button("Analyze", type="primary"):
+        domains = [d.strip() for d in domain_text.strip().splitlines() if d.strip()][:50]
         if not domains:
-            st.warning("Please enter at least one domain name.")
+            st.warning("Enter at least one domain.")
         else:
-            domains = domains[:50]
-            results = predict(model, classes, energy_T, domains)
+            with st.spinner(f"Running {selected_model_label}…"):
+                results = run_inference(selected_model_key, domains)
 
             st.divider()
-            st.subheader(f"Results — {len(results)} domain(s)")
+            st.subheader(f"Results — {len(results)} domain(s)  ·  model: **{selected_model_label}**")
 
+            is_lgbm = selected_model_key == "lgbm"
             table_rows = []
             for r in results:
                 verdict, _ = _verdict(r, ood_threshold)
-                table_rows.append({
+                row = {
                     "Domain": r["domain"],
                     "Prediction": r["predicted_class"],
                     "Confidence": f"{r['confidence']:.1%}",
                     "DGA probability": f"{r['dga_prob']:.1%}",
-                    "MSP score": f"{r['msp_score']:.4f}",
-                    "Energy score": f"{r['energy_score']:.4f}",
-                    "Verdict": verdict,
-                })
+                    "Verdict": verdict if not is_lgbm else ("Benign" if r["predicted_class"] == "benign" else "DGA"),
+                }
+                if not is_lgbm:
+                    row["MSP score"] = f"{r['msp_score']:.4f}"
+                    row["Energy score"] = f"{r['energy_score']:.4f}" if not pd.isna(r["energy_score"]) else "—"
+                table_rows.append(row)
 
             df_res = pd.DataFrame(table_rows)
             st.dataframe(
                 df_res.style.map(_style_verdict, subset=["Verdict"]),
-                use_container_width=True,
-                hide_index=True,
+                use_container_width=True, hide_index=True,
             )
 
-            if len(results) == 1 or st.checkbox("Show probability charts", value=len(results) <= 5):
+            if not is_lgbm and (
+                len(results) == 1 or st.checkbox("Show probability charts", value=len(results) <= 5)
+            ):
                 for r in results:
                     verdict, color = _verdict(r, ood_threshold)
-                    badge_html = _badge(verdict, color)
-                    with st.expander(f"**{r['domain']}** — {badge_html}", expanded=(len(results) == 1)):
+                    with st.expander(f"**{r['domain']}** — {_badge(verdict, color)}", expanded=len(results) == 1):
                         c1, c2, c3, c4 = st.columns(4)
                         c1.metric("Predicted class", r["predicted_class"].upper())
                         c2.metric("Confidence", f"{r['confidence']:.1%}")
                         c3.metric("DGA probability", f"{r['dga_prob']:.1%}")
-                        c4.metric("MSP / Energy", f"{r['msp_score']:.3f} / {r['energy_score']:.2f}")
+                        c4.metric("MSP score", f"{r['msp_score']:.3f}")
                         prob_df = pd.DataFrame({
-                            "Class": classes,
-                            "Probability": r["probabilities"],
+                            "Class": _CLASSES, "Probability": r["probabilities"],
                         }).sort_values("Probability", ascending=False)
-                        st.bar_chart(prob_df.set_index("Class"), height=260)
+                        st.bar_chart(prob_df.set_index("Class"), height=240)
 
             if len(results) > 1:
                 st.divider()
-                st.subheader("Aggregate summary")
-                n_benign = sum(1 for r in results if _verdict(r, ood_threshold)[0] == "Benign")
-                n_ood = sum(1 for r in results if _verdict(r, ood_threshold)[0] == "Unknown / OOD")
-                n_dga = len(results) - n_benign - n_ood
-                a1, a2, a3 = st.columns(3)
+                n_benign = sum(1 for r in results if r["predicted_class"] == "benign")
+                n_dga = len(results) - n_benign
+                a1, a2 = st.columns(2)
                 a1.metric("Benign", n_benign)
-                a2.metric("Known DGA", n_dga)
-                a3.metric("Unknown / OOD", n_ood)
-
-                family_counts = {}
-                for r in results:
-                    v, _ = _verdict(r, ood_threshold)
-                    if v not in ("Benign", "Unknown / OOD"):
-                        fam = r["predicted_class"]
-                        family_counts[fam] = family_counts.get(fam, 0) + 1
-                if family_counts:
-                    st.markdown("**Detected DGA families:**")
-                    fam_df = (
-                        pd.DataFrame(list(family_counts.items()), columns=["Family", "Count"])
-                        .sort_values("Count", ascending=False)
-                    )
-                    st.bar_chart(fam_df.set_index("Family"), height=200)
+                a2.metric("DGA / Unknown", n_dga)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 – EDA DASHBOARD
+# TAB 2 – MODEL COMPARISON
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_compare:
+    st.subheader("Model performance comparison")
+    st.caption("Evaluated on held-out test sets · OOD: unknown_family split")
+
+    def _read_meta(fname):
+        path = MODELS_DIR / fname
+        if path.exists():
+            with open(path) as f:
+                return json.load(f)
+        return {}
+
+    bilstm_m   = _read_meta("bilstm_meta.json")
+    cnn_m      = _read_meta("neural_meta.json")
+    bilstm_oe_m = _read_meta("bilstm_oe_meta.json")
+    lgbm_m     = _read_meta("lgbm_binary_meta.json")
+    lgbm_mc_m  = _read_meta("lgbm_multiclass_meta.json")
+
+    def _g(d, *keys, default=None):
+        for k in keys:
+            if isinstance(d, dict):
+                d = d.get(k, {})
+            else:
+                return default
+        return d if d != {} else default
+
+    rows_cls = [
+        {"Model": "LGBM Binary",
+         "Binary Acc": _g(lgbm_m, "binary_test_known", "accuracy"),
+         "Binary F1":  _g(lgbm_m, "binary_test_known", "f1"),
+         "Binary AUC": _g(lgbm_m, "binary_test_known", "roc_auc"),
+         "MC Acc": "—"},
+        {"Model": "LGBM Multiclass",
+         "Binary Acc": _g(lgbm_mc_m, "cls_test_known", "bin_accuracy"),
+         "Binary F1":  _g(lgbm_mc_m, "cls_test_known", "bin_f1"),
+         "Binary AUC": _g(lgbm_mc_m, "cls_test_known", "bin_roc_auc"),
+         "MC Acc": _g(lgbm_mc_m, "cls_test_known", "mc_accuracy")},
+        {"Model": "CNN",
+         "Binary Acc": _g(cnn_m, "cls_test_known", "bin_accuracy"),
+         "Binary F1":  _g(cnn_m, "cls_test_known", "bin_f1"),
+         "Binary AUC": _g(cnn_m, "cls_test_known", "bin_roc_auc"),
+         "MC Acc": _g(cnn_m, "cls_test_known", "mc_accuracy")},
+        {"Model": "BiLSTM",
+         "Binary Acc": _g(bilstm_m, "cls_test_known", "bin_accuracy"),
+         "Binary F1":  _g(bilstm_m, "cls_test_known", "bin_f1"),
+         "Binary AUC": _g(bilstm_m, "cls_test_known", "bin_roc_auc"),
+         "MC Acc": _g(bilstm_m, "cls_test_known", "mc_accuracy")},
+        {"Model": "BiLSTM + OE",
+         "Binary Acc": _g(bilstm_oe_m, "cls", "bin_accuracy"),
+         "Binary F1":  _g(bilstm_oe_m, "cls", "bin_f1"),
+         "Binary AUC": _g(bilstm_oe_m, "cls", "bin_roc_auc"),
+         "MC Acc": _g(bilstm_oe_m, "cls", "mc_accuracy")},
+    ]
+
+    def _fmt(v):
+        if v is None or v == "—":
+            return "—"
+        return f"{v:.4f}"
+
+    df_cls = pd.DataFrame(rows_cls)
+    for col in ["Binary Acc", "Binary F1", "Binary AUC", "MC Acc"]:
+        df_cls[col] = df_cls[col].apply(_fmt)
+    st.markdown("#### Classification metrics (test_known)")
+    st.dataframe(df_cls, use_container_width=True, hide_index=True)
+
+    # OOD metrics (unknown_family, best scorer per model)
+    rows_ood = [
+        {"Model": "LGBM Binary",    "Scorer": "MSP",      "AUROC": _g(lgbm_m,      "ood_msp_unknown_family",         "auroc"),  "FPR@95TPR": _g(lgbm_m,      "ood_msp_unknown_family",         "fpr_at_tpr")},
+        {"Model": "LGBM Multiclass","Scorer": "MSP",      "AUROC": _g(lgbm_mc_m,   "ood_msp_unknown_family",         "auroc"),  "FPR@95TPR": _g(lgbm_mc_m,   "ood_msp_unknown_family",         "fpr_at_tpr")},
+        {"Model": "CNN",            "Scorer": "MSP",      "AUROC": _g(cnn_m,        "ood_msp_unknown_family",         "auroc"),  "FPR@95TPR": _g(cnn_m,        "ood_msp_unknown_family",         "fpr_at_tpr")},
+        {"Model": "BiLSTM",         "Scorer": "Energy",   "AUROC": _g(bilstm_m,     "ood_energy_unknown_family",      "auroc"),  "FPR@95TPR": _g(bilstm_m,     "ood_energy_unknown_family",      "fpr_at_tpr")},
+        {"Model": "BiLSTM + OE",    "Scorer": "Energy",   "AUROC": _g(bilstm_oe_m,  "ood_energy_unknown_family",      "auroc"),  "FPR@95TPR": _g(bilstm_oe_m,  "ood_energy_unknown_family",      "fpr_at_tpr")},
+    ]
+    df_ood = pd.DataFrame(rows_ood)
+    for col in ["AUROC", "FPR@95TPR"]:
+        df_ood[col] = df_ood[col].apply(_fmt)
+    st.markdown("#### OOD detection — unknown_family (best scorer per model)")
+    st.dataframe(df_ood, use_container_width=True, hide_index=True)
+
+    # AUROC bar chart
+    auroc_vals = {r["Model"]: _g(bilstm_m, "ood_energy_unknown_family", "auroc") if r["Model"] == "BiLSTM"
+                  else (_g(bilstm_oe_m, "ood_energy_unknown_family", "auroc") if r["Model"] == "BiLSTM + OE"
+                  else (_g(lgbm_m, "ood_msp_unknown_family", "auroc") if r["Model"] == "LGBM Binary"
+                  else (_g(lgbm_mc_m, "ood_msp_unknown_family", "auroc") if r["Model"] == "LGBM Multiclass"
+                  else _g(cnn_m, "ood_msp_unknown_family", "auroc"))))
+                  for r in rows_ood}
+    auroc_df = pd.Series({k: v for k, v in auroc_vals.items() if v is not None}).sort_values(ascending=False)
+    st.markdown("**AUROC comparison (unknown_family)**")
+    st.bar_chart(auroc_df.rename("AUROC"), height=260)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 – EDA DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_eda:
@@ -327,19 +474,13 @@ with tab_eda:
     all_classes = sorted(eda["class_label"].unique())
     all_features = [c for c in eda.columns if c not in ("domain", "class_label")]
 
-    # ── filters ───────────────────────────────────────────────────────────
     with st.expander("Filters", expanded=True):
         f1, f2 = st.columns(2)
         with f1:
-            selected_classes = st.multiselect(
-                "Filter by class",
-                options=all_classes,
-                default=all_classes,
-                help="Select which classes to display",
-            )
+            selected_classes = st.multiselect("Filter by class", all_classes, default=all_classes)
         with f2:
             selected_feature = st.selectbox(
-                "Primary feature (for distribution plots)",
+                "Primary feature",
                 options=all_features,
                 index=all_features.index("char_entropy") if "char_entropy" in all_features else 0,
             )
@@ -348,72 +489,55 @@ with tab_eda:
         st.warning("Select at least one class.")
         st.stop()
 
-    eda_filtered = eda[eda["class_label"].isin(selected_classes)]
+    eda_f = eda[eda["class_label"].isin(selected_classes)]
 
-    # ── section 1: class distribution ────────────────────────────────────
     st.markdown("### Class distribution")
-    class_counts = eda_filtered["class_label"].value_counts().reset_index()
-    class_counts.columns = ["class_label", "count"]
-    class_counts = class_counts.sort_values("count", ascending=False)
-    st.bar_chart(class_counts.set_index("class_label"), height=300)
+    cc = eda_f["class_label"].value_counts().sort_values(ascending=False)
+    st.bar_chart(cc.rename("count"), height=280)
 
-    # ── section 2: feature distribution by class ──────────────────────────
-    st.markdown(f"### Distribution of `{selected_feature}` by class")
+    st.markdown(f"### `{selected_feature}` distribution by class")
     pivot = (
-        eda_filtered.groupby("class_label")[selected_feature]
+        eda_f.groupby("class_label")[selected_feature]
         .describe()[["mean", "50%", "std"]]
         .rename(columns={"50%": "median"})
         .sort_values("mean", ascending=False)
     )
     st.dataframe(pivot.style.format("{:.4f}"), use_container_width=True)
+    st.bar_chart(
+        eda_f.groupby("class_label")[selected_feature].mean().sort_values(ascending=False).rename("mean"),
+        height=260,
+    )
 
-    # Box-plot style using mean ± std bars
-    st.markdown("**Mean ± 1 std per class**")
-    mean_vals = eda_filtered.groupby("class_label")[selected_feature].mean().sort_values(ascending=False)
-    st.bar_chart(mean_vals.rename("mean"), height=280)
-
-    # ── section 3: feature comparison ─────────────────────────────────────
     st.markdown("### Feature comparison: benign vs DGA")
     compare_features = st.multiselect(
         "Select features to compare",
         options=all_features,
-        default=["char_entropy", "length", "digit_ratio", "vowel_ratio",
-                 "markov_log_likelihood", "compression_ratio"][:min(6, len(all_features))],
+        default=[f for f in ["char_entropy", "length", "digit_ratio", "vowel_ratio",
+                              "markov_log_likelihood", "compression_ratio"] if f in all_features],
     )
-
     if compare_features:
-        eda_filtered2 = eda_filtered.copy()
-        eda_filtered2["group"] = eda_filtered2["class_label"].apply(
-            lambda x: "benign" if x == "benign" else "DGA"
-        )
-        grp_mean = eda_filtered2.groupby("group")[compare_features].mean()
-        st.dataframe(grp_mean.T.style.format("{:.4f}"), use_container_width=True)
+        tmp = eda_f.copy()
+        tmp["group"] = tmp["class_label"].apply(lambda x: "benign" if x == "benign" else "DGA")
+        grp = tmp.groupby("group")[compare_features].mean()
+        st.dataframe(grp.T.style.format("{:.4f}"), use_container_width=True)
+        norm = grp.T
+        norm_s = (norm - norm.min()) / (norm.max() - norm.min() + 1e-9)
+        st.bar_chart(norm_s, height=280)
 
-        st.markdown("**Normalized mean per feature (benign vs DGA)**")
-        norm = grp_mean.T
-        norm_scaled = (norm - norm.min()) / (norm.max() - norm.min() + 1e-9)
-        st.bar_chart(norm_scaled, height=300)
+    st.markdown("### Top features separating benign vs DGA")
+    eda_all = eda.copy()
+    eda_all["group"] = eda_all["class_label"].apply(lambda x: "benign" if x == "benign" else "DGA")
+    means = eda_all.groupby("group")[all_features].mean()
+    if "benign" in means.index and "DGA" in means.index:
+        diff = (means.loc["DGA"] - means.loc["benign"]).abs().sort_values(ascending=False)
+        st.bar_chart(diff.head(10).rename("|Mean diff| DGA vs Benign"), height=260)
+        st.dataframe(diff.head(10).reset_index().rename(columns={"index": "Feature", 0: "|Mean diff|"})
+                     .style.format({"|Mean diff|": "{:.4f}"}), use_container_width=True, hide_index=True)
 
-    # ── section 4: raw sample table ───────────────────────────────────────
     st.markdown("### Raw data sample")
     n_show = st.slider("Rows to display", 10, 200, 50, step=10)
-    display_cols = ["domain", "class_label"] + compare_features if compare_features else ["domain", "class_label"] + all_features[:8]
+    show_cols = ["domain", "class_label"] + (compare_features if compare_features else all_features[:8])
     st.dataframe(
-        eda_filtered[display_cols].sample(min(n_show, len(eda_filtered)), random_state=0),
-        use_container_width=True,
-        hide_index=True,
+        eda_f[show_cols].sample(min(n_show, len(eda_f)), random_state=0),
+        use_container_width=True, hide_index=True,
     )
-
-    # ── section 5: top features separating benign vs DGA ──────────────────
-    st.markdown("### Top features separating benign vs DGA")
-    st.caption("Ranked by absolute difference in class means (benign vs all DGA)")
-    if len(selected_classes) > 1:
-        eda_all = eda.copy()
-        eda_all["group"] = eda_all["class_label"].apply(lambda x: "benign" if x == "benign" else "DGA")
-        means = eda_all.groupby("group")[all_features].mean()
-        if "benign" in means.index and "DGA" in means.index:
-            diff = (means.loc["DGA"] - means.loc["benign"]).abs().sort_values(ascending=False)
-            top10 = diff.head(10).reset_index()
-            top10.columns = ["Feature", "|Mean difference|"]
-            st.dataframe(top10.style.format({"| Mean difference|": "{:.4f}"}), use_container_width=True, hide_index=True)
-            st.bar_chart(diff.head(10).rename("|Mean diff| DGA vs Benign"), height=280)

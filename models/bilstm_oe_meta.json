@@ -1,0 +1,80 @@
+{
+  "ood_energy_unknown_family": {
+    "auroc": 0.72758728125,
+    "aupr_out": 0.7425464032096116,
+    "aupr_in": 0.7101977088002485,
+    "fpr_at_tpr": 0.714725,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.624268948205391
+  },
+  "ood_energy_oe_test": {
+    "auroc": 0.8148677787499999,
+    "aupr_out": 0.7855894176097173,
+    "aupr_in": 0.8185838567612401,
+    "fpr_at_tpr": 0.5328,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.6902865779224554
+  },
+  "ood_msp_unknown_family": {
+    "auroc": 0.7225272965,
+    "aupr_out": 0.7616227042640916,
+    "aupr_in": 0.6546156076807943,
+    "fpr_at_tpr": 0.822775,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.5907152006566265
+  },
+  "ood_msp_oe_test": {
+    "auroc": 0.8266661820000001,
+    "aupr_out": 0.8582362268403682,
+    "aupr_in": 0.8192466646718127,
+    "fpr_at_tpr": 0.544475,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.6856334531387578
+  },
+  "ood_knn_unknown_family": {
+    "auroc": 0.58030519625,
+    "aupr_out": 0.6565477404547135,
+    "aupr_in": 0.5211446061842466,
+    "fpr_at_tpr": 0.908675,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.5665080444142306
+  },
+  "ood_knn_oe_test": {
+    "auroc": 0.28843602349999997,
+    "aupr_out": 0.4214252427970342,
+    "aupr_in": 0.33177754704047685,
+    "fpr_at_tpr": 0.98395,
+    "tpr_target": 0.95,
+    "realized_tpr": 0.95,
+    "precision_at_tpr": 0.5468696032604942
+  },
+  "cls": {
+    "mc_accuracy": 0.934525,
+    "bin_accuracy": 0.9177,
+    "bin_f1": 0.9224426329925082,
+    "bin_roc_auc": 0.9897419025819446
+  },
+  "params": {
+    "run_dir": "../data/processed",
+    "out_dir": null,
+    "epochs": 30,
+    "batch": 512,
+    "lr": 0.001,
+    "embed_dim": 32,
+    "hidden_dim": 64,
+    "num_layers": 1,
+    "feat_dim": 128,
+    "dropout": 0.2,
+    "patience": 5,
+    "lambda_oe": 0.5,
+    "oe_train_size": 50000,
+    "energy_T": 1.0,
+    "knn_k": 5,
+    "device": "cpu"
+  }
+}
