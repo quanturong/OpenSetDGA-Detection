@@ -30,6 +30,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -218,6 +219,10 @@ def main():
                     help="Penultimate layer dimension used for Mahalanobis")
     ap.add_argument("--patience", type=int, default=5,
                     help="Early stopping patience (val loss)")
+    ap.add_argument("--energy_T", type=float, default=1.0,
+                    help="Temperature for energy score")
+    ap.add_argument("--knn_k", type=int, default=5)
+    ap.add_argument("--knn_subsample", type=int, default=50_000)
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args()
 
@@ -349,6 +354,17 @@ def main():
     scorer.fit(feats["train"], y_train)
     print("  Done.")
 
+    # ── 8b. Fit KNN scorer ────────────────────────────────────────────────
+    print(f"\nBuilding KNN index (k={args.knn_k}) ...")
+    train_feats_knn = feats["train"]
+    if len(train_feats_knn) > args.knn_subsample:
+        rng_knn = np.random.default_rng(42)
+        idx_knn = rng_knn.choice(len(train_feats_knn), size=args.knn_subsample, replace=False)
+        train_feats_knn = train_feats_knn[idx_knn]
+    knn = NearestNeighbors(n_neighbors=args.knn_k, algorithm="auto", n_jobs=-1)
+    knn.fit(train_feats_knn)
+    print("  Done.")
+
     # ── 9. Binary classification eval ─────────────────────────────────────
     print("\n" + "=" * 65)
     print("  Classification Results (test_known)")
@@ -375,28 +391,39 @@ def main():
     print("  OOD Detection Evaluation")
     print("=" * 65)
 
-    # Pre-compute scores
-    proba_known = F.softmax(torch.tensor(logits["test_known"]), dim=-1).numpy()
-
     def _msp_score(split):
         p = F.softmax(torch.tensor(logits[split]), dim=-1).numpy()
         return 1.0 - p.max(axis=1)
 
+    def _energy_score(split):
+        T = args.energy_T
+        lg = torch.tensor(logits[split])
+        return -(T * torch.logsumexp(lg / T, dim=-1)).numpy()
+
+    def _knn_score(split):
+        dists, _ = knn.kneighbors(feats[split])
+        return dists.mean(axis=1)
+
     scorer_fns = {
         "msp": _msp_score,
+        "energy": _energy_score,
         "mahalanobis": lambda split: scorer.score(feats[split]),
+        "knn": _knn_score,
     }
-    id_msp = _msp_score("test_known")
-    id_mahal = scorer.score(feats["test_known"])
+    id_scores = {
+        "msp": _msp_score("test_known"),
+        "energy": _energy_score("test_known"),
+        "mahalanobis": scorer.score(feats["test_known"]),
+        "knn": _knn_score("test_known"),
+    }
 
     ood_splits = ["unknown_family", "unknown_ood"]
 
     for sname, sfn in scorer_fns.items():
-        print(f"\n── {sname} ──")
-        id_s = _msp_score("test_known") if sname == "msp" else id_mahal
+        print(f"\n-- {sname} --")
         for split in ood_splits:
             ood_s = sfn(split)
-            m = ood_metrics(id_s, ood_s)
+            m = ood_metrics(id_scores[sname], ood_s)
             results[f"ood_{sname}_{split}"] = m
             print_ood_metrics(m, split)
 
@@ -405,10 +432,9 @@ def main():
                 "ood_score": ood_s,
             }).to_csv(str(out_dir / f"scores_{sname}_{split}.csv"), index=False)
 
-        id_ref = _msp_score("test_known") if sname == "msp" else id_mahal
         pd.DataFrame({
             "domain": dfs["test_known"]["domain"].values,
-            "ood_score": id_ref,
+            "ood_score": id_scores[sname],
         }).to_csv(str(out_dir / f"scores_{sname}_known.csv"), index=False)
 
     # ── 11. Save + Summary ────────────────────────────────────────────────
@@ -425,7 +451,7 @@ def main():
     print(f"  Binary  (test_known): Acc={ck['bin_accuracy']:.4f}  F1={ck['bin_f1']:.4f}"
           f"  AUC={ck['bin_roc_auc']:.4f}")
     print(f"  19-class(test_known): Acc={ck['mc_accuracy']:.4f}")
-    for sn in ["msp", "mahalanobis"]:
+    for sn in ["msp", "energy", "mahalanobis", "knn"]:
         print(f"\n  OOD ({sn}):")
         for sl in ood_splits:
             m = results[f"ood_{sn}_{sl}"]
