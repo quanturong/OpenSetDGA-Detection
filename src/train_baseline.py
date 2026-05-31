@@ -33,6 +33,9 @@ from sklearn.metrics import (
 )
 
 from features import FEATURE_NAMES, extract_features_batch
+from logger import get_logger
+
+log = get_logger(__name__)
 
 # ── paths ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +57,7 @@ def _featurise(df: pd.DataFrame, cache_dir: Path | None, tag: str) -> np.ndarray
     if cache_dir is not None:
         cache_file = cache_dir / f"{tag}_feats.npy"
         if cache_file.exists():
-            print(f"  [cache hit] {cache_file}")
+            log.info(f"  [cache hit] {cache_file}")
             return np.load(str(cache_file))
 
     domains = df["domain"].tolist()
@@ -64,8 +67,7 @@ def _featurise(df: pd.DataFrame, cache_dir: Path | None, tag: str) -> np.ndarray
         batch = domains[i:i + BATCH]
         parts.append(extract_features_batch(batch))
         done = min(i + BATCH, len(domains))
-        print(f"    featurised {done:>8,} / {len(domains):,}", end="\r")
-    print()
+        log.info(f"    featurised {done:>8,} / {len(domains):,}")
     X = np.vstack(parts)
 
     if cache_dir is not None:
@@ -97,13 +99,13 @@ def _evaluate_binary(y_true, y_pred, y_proba, label: str):
     acc = accuracy_score(y_true, y_pred)
     f1 = f1_score(y_true, y_pred, average="binary")
     auc = roc_auc_score(y_true, y_proba)
-    print(f"\n{'=' * 60}")
-    print(f"  Binary classification – {label}")
-    print(f"{'=' * 60}")
-    print(f"  Accuracy : {acc:.4f}")
-    print(f"  F1       : {f1:.4f}")
-    print(f"  ROC-AUC  : {auc:.4f}")
-    print(classification_report(y_true, y_pred, target_names=["benign", "dga"]))
+    log.info(f"\n{'=' * 60}")
+    log.info(f"  Binary classification – {label}")
+    log.info(f"{'=' * 60}")
+    log.info(f"  Accuracy : {acc:.4f}")
+    log.info(f"  F1       : {f1:.4f}")
+    log.info(f"  ROC-AUC  : {auc:.4f}")
+    log.info(classification_report(y_true, y_pred, target_names=["benign", "dga"]))
     return {"accuracy": acc, "f1": f1, "roc_auc": auc}
 
 
@@ -191,22 +193,22 @@ def main():
             sys.exit(f"Missing CSV: {p}")
 
     # ── 1. Load data ────────────────────────────────────────────────────────
-    print("Loading CSVs …")
+    log.info("Loading CSVs …")
     dfs = {k: pd.read_csv(str(p)) for k, p in csvs.items()}
     for k, df in dfs.items():
-        print(f"  {k:20s}: {len(df):>8,} rows")
+        log.info(f"  {k:20s}: {len(df):>8,} rows")
 
     # ── 2. Feature extraction ───────────────────────────────────────────────
-    print("\nExtracting features …")
+    log.info("\nExtracting features …")
     Xs, ys = {}, {}
     for k, df in dfs.items():
-        print(f"  [{k}]")
+        log.info(f"  [{k}]")
         Xs[k] = _featurise(df, cache_dir, k)
         # binary label: benign=0, dga/ood=1
         ys[k] = (df["label"] != "benign").astype(int).values
 
     # ── 3. Train LightGBM ──────────────────────────────────────────────────
-    print("\nTraining LightGBM …")
+    log.info("\nTraining LightGBM …")
     params = {
         "objective": "binary",
         "metric": "binary_logloss",
@@ -229,12 +231,12 @@ def main():
         ],
     )
     best_iter = model.best_iteration_
-    print(f"  Best iteration: {best_iter}")
+    log.info(f"  Best iteration: {best_iter}")
 
     # save model
     model_path = out_dir / "model.txt"
     model.booster_.save_model(str(model_path))
-    print(f"  Model saved → {model_path}")
+    log.info(f"  Model saved → {model_path}")
 
     # feature importance
     imp = pd.DataFrame({
@@ -242,8 +244,8 @@ def main():
         "importance": model.feature_importances_,
     }).sort_values("importance", ascending=False)
     imp.to_csv(str(out_dir / "feature_importance.csv"), index=False)
-    print(f"\n  Top-10 features:")
-    print(imp.head(10).to_string(index=False))
+    log.info(f"\n  Top-10 features:")
+    log.info(imp.head(10).to_string(index=False))
 
     # ── 4. Evaluate binary classification ───────────────────────────────────
     results = {}
@@ -253,9 +255,9 @@ def main():
         results[f"binary_{split}"] = _evaluate_binary(ys[split], pred, proba, split)
 
     # ── 5. OOD scoring ──────────────────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print("  OOD Detection Evaluation")
-    print("=" * 60)
+    log.info("\n" + "=" * 60)
+    log.info("  OOD Detection Evaluation")
+    log.info("=" * 60)
 
     # ID scores come from test_known
     proba_known = model.predict_proba(Xs["test_known"])
@@ -268,7 +270,7 @@ def main():
     }
 
     for score_name, score_fn in [("msp", _msp_score), ("energy", lambda p: _energy_score(p, T=args.energy_T))]:
-        print(f"\n── Score: {score_name} ──")
+        log.info(f"\n── Score: {score_name} ──")
         id_scores = score_fn(proba_known)
 
         for split_label, split_key in ood_splits.items():
@@ -278,11 +280,11 @@ def main():
             metrics = _ood_metrics(id_scores, ood_scores)
             results[f"ood_{score_name}_{split_label}"] = metrics
 
-            print(f"\n  {split_label}:")
-            print(f"    AUROC      : {metrics['auroc']:.6f}")
-            print(f"    AUPR-OUT   : {metrics['aupr_out']:.6f}")
-            print(f"    AUPR-IN    : {metrics['aupr_in']:.6f}")
-            print(f"    FPR@TPR=0.95: {metrics['fpr_at_tpr']:.6f} (realized TPR={metrics['realized_tpr']:.6f})")
+            log.info(f"\n  {split_label}:")
+            log.info(f"    AUROC      : {metrics['auroc']:.6f}")
+            log.info(f"    AUPR-OUT   : {metrics['aupr_out']:.6f}")
+            log.info(f"    AUPR-IN    : {metrics['aupr_in']:.6f}")
+            log.info(f"    FPR@TPR=0.95: {metrics['fpr_at_tpr']:.6f} (realized TPR={metrics['realized_tpr']:.6f})")
 
             # save scored CSV for evaluate_ood.py compatibility
             csv_out = out_dir / f"scores_{score_name}_{split_label}.csv"
@@ -305,25 +307,24 @@ def main():
     results_path = out_dir / "results.json"
     with open(str(results_path), "w") as f:
         json.dump(results, f, indent=2, default=str)
-    print(f"\nAll results saved → {out_dir}")
+    log.info(f"\nAll results saved → {out_dir}")
 
     # ── 7. Summary table ────────────────────────────────────────────────────
-    print("\n" + "=" * 70)
-    print("  SUMMARY")
-    print("=" * 70)
-    print(f"  Binary classification (test_known):")
+    log.info("\n" + "=" * 70)
+    log.info("  SUMMARY")
+    log.info("=" * 70)
+    log.info(f"  Binary classification (test_known):")
     bk = results["binary_test_known"]
-    print(f"    Accuracy={bk['accuracy']:.4f}  F1={bk['f1']:.4f}  AUC={bk['roc_auc']:.4f}")
+    log.info(f"    Accuracy={bk['accuracy']:.4f}  F1={bk['f1']:.4f}  AUC={bk['roc_auc']:.4f}")
 
     for sn in ["msp", "energy"]:
-        print(f"\n  OOD detection ({sn}):")
+        log.info(f"\n  OOD detection ({sn}):")
         for sl in ["unknown_family", "unknown_ood"]:
             key = f"ood_{sn}_{sl}"
             if key in results:
                 m = results[key]
-                print(f"    {sl:20s}: AUROC={m['auroc']:.4f}  AUPR-OUT={m['aupr_out']:.4f}  FPR@95={m['fpr_at_tpr']:.4f}")
+                log.info(f"    {sl:20s}: AUROC={m['auroc']:.4f}  AUPR-OUT={m['aupr_out']:.4f}  FPR@95={m['fpr_at_tpr']:.4f}")
 
-    print()
 
 
 if __name__ == "__main__":

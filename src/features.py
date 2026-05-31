@@ -5,6 +5,7 @@ Produces a numeric feature vector from the raw domain string.
 
 import math
 import re
+import zlib
 from collections import Counter
 
 import numpy as np
@@ -84,6 +85,94 @@ def _gini_index(s: str) -> float:
     return 1.0 - sum((c / n) ** 2 for c in counts.values())
 
 
+# ── reference distributions (derived from Tranco top-1M benign domains) ────
+
+# Character unigram frequencies in benign (Tranco) domain SLDs
+_BENIGN_CHAR_FREQ: dict[str, float] = {
+    'a': 0.0820, 'b': 0.0145, 'c': 0.0305, 'd': 0.0365, 'e': 0.1000,
+    'f': 0.0145, 'g': 0.0235, 'h': 0.0295, 'i': 0.0625, 'j': 0.0055,
+    'k': 0.0135, 'l': 0.0475, 'm': 0.0305, 'n': 0.0640, 'o': 0.0750,
+    'p': 0.0230, 'q': 0.0025, 'r': 0.0635, 's': 0.0720, 't': 0.0680,
+    'u': 0.0335, 'v': 0.0115, 'w': 0.0175, 'x': 0.0045, 'y': 0.0195,
+    'z': 0.0030, '0': 0.0070, '1': 0.0065, '2': 0.0055, '3': 0.0035,
+    '4': 0.0025, '5': 0.0025, '6': 0.0020, '7': 0.0020, '8': 0.0020,
+    '9': 0.0020, '-': 0.0120,
+}
+
+# English character bigram log-probabilities (log base 2, normalized per leading char)
+# Top ~130 bigrams covering ~85 % of transitions in benign domains.
+# Unseen bigrams get a floor of -10.0.
+_BIGRAM_LOG2: dict[str, float] = {
+    'th': -1.26, 'he': -1.42, 'in': -1.55, 'er': -1.61, 'an': -1.66,
+    're': -1.72, 'on': -1.82, 'en': -1.87, 'at': -1.96, 'es': -1.97,
+    'ed': -2.02, 'nd': -2.06, 'to': -2.07, 'or': -2.10, 'ea': -2.13,
+    'ti': -2.15, 'it': -2.21, 'st': -2.27, 'io': -2.30, 'le': -2.32,
+    'is': -2.35, 'ou': -2.38, 'ar': -2.41, 'as': -2.44, 'de': -2.47,
+    'rt': -2.52, 'se': -2.55, 'nt': -2.59, 'ha': -2.63, 'ng': -2.65,
+    'al': -2.68, 'ss': -2.71, 'te': -2.73, 'si': -2.76, 'co': -2.78,
+    'me': -2.81, 'ne': -2.83, 'ro': -2.85, 'li': -2.88, 'ri': -2.90,
+    'hi': -2.93, 'ra': -2.95, 'ic': -2.97, 'ce': -3.00, 'il': -3.02,
+    'rs': -3.05, 'tr': -3.07, 'ns': -3.10, 'ot': -3.13, 'el': -3.15,
+    'ad': -3.18, 'ma': -3.21, 'la': -3.23, 'na': -3.25, 'lo': -3.27,
+    'pr': -3.30, 'ac': -3.32, 'ca': -3.35, 'om': -3.37, 'et': -3.40,
+    'di': -3.43, 'po': -3.46, 'ge': -3.48, 'sp': -3.51, 'ta': -3.53,
+    'ec': -3.55, 'sa': -3.58, 'un': -3.60, 'mi': -3.62, 'fo': -3.65,
+    'pe': -3.67, 'gi': -3.70, 'so': -3.72, 'pa': -3.74, 'fi': -3.77,
+    'mo': -3.79, 'pl': -3.82, 'ho': -3.84, 'ba': -3.87, 'bu': -3.89,
+    'op': -3.91, 'pi': -3.93, 'ab': -3.95, 'ty': -3.97, 'iv': -4.00,
+    'gr': -4.02, 'ly': -3.05, 'ry': -4.04, 'em': -4.06, 'bi': -4.08,
+    'ow': -4.11, 'cl': -4.13, 'ex': -4.16, 'ev': -4.18, 'do': -4.20,
+    'id': -4.23, 'be': -4.25, 'no': -4.27, 've': -4.30, 'fr': -4.32,
+    'vi': -4.34, 'ol': -4.36, 'wo': -4.38, 'ch': -4.40, 'am': -4.42,
+    'ob': -4.44, 'pu': -4.46, 'tu': -4.48, 'if': -4.50, 'cr': -4.52,
+    'ag': -4.55, 'cy': -4.57, 'us': -4.59, 'bl': -4.61, 'ia': -4.63,
+    'im': -4.65, 'mp': -4.67, 'ul': -4.70, 'ur': -4.72, 'lt': -4.74,
+    'ct': -4.76, 'pp': -4.78, 'ip': -4.80, 'oc': -4.82, 'ik': -4.84,
+    'ep': -4.86, 'ui': -4.89, 'fu': -4.91, 'ap': -4.93, 'gl': -4.95,
+}
+
+_BIGRAM_LOG2_FLOOR = -10.0
+
+
+def _markov_log_likelihood(s: str) -> float:
+    """Mean bigram log-likelihood under an English character bigram model.
+    Lower (more negative) = less English-like = more DGA-like.
+    Returned value is already negated so higher = more OOD."""
+    if len(s) < 2:
+        return 0.0
+    total = sum(_BIGRAM_LOG2.get(s[i:i + 2], _BIGRAM_LOG2_FLOOR)
+                for i in range(len(s) - 1))
+    return -(total / (len(s) - 1))   # negate: higher → less English-like
+
+
+def _kl_div_from_benign(s: str) -> float:
+    """KL divergence of domain's char distribution from benign reference.
+    Higher = more different from benign = more DGA-like."""
+    if not s:
+        return 0.0
+    counts = Counter(s)
+    total = len(s)
+    kl = 0.0
+    for ch, cnt in counts.items():
+        p = cnt / total
+        q = _BENIGN_CHAR_FREQ.get(ch, 1e-6)
+        kl += p * math.log(p / q)
+    return max(0.0, kl)
+
+
+def _compression_ratio(s: str) -> float:
+    """zlib compression ratio = compressed_len / original_len.
+    Low ratio → high repetition → more structured (benign-like).
+    High ratio → random-looking → more DGA-like."""
+    if not s:
+        return 1.0
+    try:
+        compressed = zlib.compress(s.encode("ascii", errors="replace"), level=9)
+        return len(compressed) / len(s)
+    except Exception:
+        return 1.0
+
+
 # ── main extraction ────────────────────────────────────────────────────────
 
 FEATURE_NAMES: list[str] = [
@@ -122,6 +211,9 @@ FEATURE_NAMES: list[str] = [
     "sld_digit_ratio",
     "sld_entropy",
     "subdomain_count",
+    "markov_log_likelihood",
+    "kl_div_from_benign",
+    "compression_ratio",
 ]
 
 
@@ -205,6 +297,9 @@ def extract_features_single(domain: str) -> np.ndarray:
         sum(c.isdigit() for c in sld) / sld_len,    # sld_digit_ratio
         _entropy(sld),                               # sld_entropy
         len(sub_parts),                              # subdomain_count
+        _markov_log_likelihood(full),                # markov_log_likelihood
+        _kl_div_from_benign(full),                   # kl_div_from_benign
+        _compression_ratio(full),                    # compression_ratio
     ], dtype=np.float32)
 
     return feats
