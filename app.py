@@ -634,8 +634,19 @@ with tab_eda:
         dist_series = pd.Series(real_dist).loc[
             [c for c in real_dist if c in selected_classes]
         ].sort_values(ascending=False)
-        st.caption(f"Total: {dist_series.sum():,} domains · Benign: {real_dist.get('benign',0):,} · DGA: {dist_series.sum()-real_dist.get('benign',0):,}")
-        st.bar_chart(dist_series.rename("# samples"), height=300)
+        n_benign = real_dist.get("benign", 0)
+        n_dga = dist_series.sum() - n_benign
+        st.caption(f"Total: {dist_series.sum():,} domains · Benign: {n_benign:,} · DGA: {n_dga:,}")
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("**Benign vs DGA (tổng)**")
+            overview = pd.Series({"Benign": n_benign, "DGA (all families)": n_dga})
+            st.bar_chart(overview.rename("# samples"), height=260)
+        with col_b:
+            st.markdown("**Từng DGA family**")
+            dga_only = dist_series.drop(index="benign", errors="ignore").sort_values(ascending=False)
+            st.bar_chart(dga_only.rename("# samples"), height=260)
     else:
         cc = eda_f["class_label"].value_counts().sort_values(ascending=False)
         st.bar_chart(cc.rename("count"), height=280)
