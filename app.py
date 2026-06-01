@@ -625,9 +625,20 @@ with tab_eda:
 
     eda_f = eda[eda["class_label"].isin(selected_classes)]
 
-    st.markdown("### Class distribution")
-    cc = eda_f["class_label"].value_counts().sort_values(ascending=False)
-    st.bar_chart(cc.rename("count"), height=280)
+    # ── real class distribution from training data ────────────────────────
+    st.markdown("### Class distribution (training set)")
+    dist_path = ROOT / "data" / "eda" / "class_distribution.json"
+    if dist_path.exists():
+        with open(dist_path) as f:
+            real_dist = json.load(f)
+        dist_series = pd.Series(real_dist).loc[
+            [c for c in real_dist if c in selected_classes]
+        ].sort_values(ascending=False)
+        st.caption(f"Total: {dist_series.sum():,} domains · Benign: {real_dist.get('benign',0):,} · DGA: {dist_series.sum()-real_dist.get('benign',0):,}")
+        st.bar_chart(dist_series.rename("# samples"), height=300)
+    else:
+        cc = eda_f["class_label"].value_counts().sort_values(ascending=False)
+        st.bar_chart(cc.rename("count"), height=280)
 
     st.markdown(f"### `{selected_feature}` distribution by class")
     pivot = (
