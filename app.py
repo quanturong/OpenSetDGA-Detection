@@ -569,6 +569,12 @@ with tab_compare:
         df_mc[col] = df_mc[col].apply(_fmt)
     st.dataframe(df_mc, use_container_width=True, hide_index=True)
 
+    mc_metric_chart = st.selectbox("Visualise metric ", ["Macro F1", "MC Accuracy", "Macro Precision", "Macro Recall"], key="mc_metric")
+    mc_chart_data = df_mc.set_index("Model")[mc_metric_chart].apply(
+        lambda x: float(x) if x != "—" else None
+    ).dropna().sort_values(ascending=False)
+    st.bar_chart(mc_chart_data.rename(mc_metric_chart), height=240)
+
     # ── 3. OOD detection ──────────────────────────────────────────────────
     st.markdown("#### OOD detection — unknown_family (best scorer per model)")
     st.caption("AUPR-out = precision-recall AUC treating OOD as positive · Precision@TPR95 = precision when recall=95%")
