@@ -313,7 +313,7 @@ def _verdict(row: dict, threshold: float, scorer: str = "MSP") -> tuple[str, str
     if scorer == "Energy":
         is_ood = score > threshold * 20        # Energy negated range ≈ 0–20
     elif scorer == "KNN":
-        is_ood = score > threshold * 50        # KNN distance range ≈ 0–50
+        is_ood = score > threshold * 17        # calibrated: known p95≈8.56, 0.5×17=8.5
     else:
         is_ood = score > threshold             # MSP: 0–1
 
