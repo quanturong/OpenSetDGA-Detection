@@ -163,6 +163,19 @@ def _load_lgbm_mc():
     return booster
 
 
+@st.cache_resource(show_spinner="Loading KNN index…")
+def _load_knn(k: int = 5):
+    from sklearn.neighbors import NearestNeighbors
+    import io
+    gz_path = MODELS_DIR / "bilstm_knn_features.npz.gz"
+    with gzip.open(gz_path, "rb") as gz:
+        data = np.load(io.BytesIO(gz.read()))
+    train_feats = data["features"]
+    nn = NearestNeighbors(n_neighbors=k, metric="euclidean", algorithm="auto", n_jobs=-1)
+    nn.fit(train_feats)
+    return nn
+
+
 @st.cache_data(show_spinner="Loading EDA data…")
 def load_eda_data() -> pd.DataFrame:
     return pd.read_csv(EDA_DATA_PATH)
@@ -170,13 +183,22 @@ def load_eda_data() -> pd.DataFrame:
 
 # ── inference ─────────────────────────────────────────────────────────────────
 
-def _neural_predict(model, domains, energy_T=1.0):
+def _neural_predict(model, domains, energy_T=1.0, knn_index=None):
     x = torch.tensor(tokenize_batch(domains), dtype=torch.long)
     with torch.no_grad():
-        logits, _ = model(x)
-    probs = F.softmax(logits, dim=-1).numpy()
+        logits, feats = model(x)
+    probs  = F.softmax(logits, dim=-1).numpy()
     energy = -(energy_T * torch.logsumexp(logits / energy_T, dim=-1)).numpy()
-    msp = 1.0 - probs.max(axis=1)
+    msp    = 1.0 - probs.max(axis=1)
+    feats_np = feats.numpy()
+
+    # KNN score = distance to k-th nearest neighbor in training features
+    if knn_index is not None:
+        dists, _ = knn_index.kneighbors(feats_np)
+        knn_scores = dists[:, -1].astype(np.float32)   # k-th neighbor distance
+    else:
+        knn_scores = np.full(len(domains), float("nan"))
+
     benign_idx = _CLASSES.index("benign")
     rows = []
     for i, domain in enumerate(domains):
@@ -188,6 +210,7 @@ def _neural_predict(model, domains, energy_T=1.0):
             "dga_prob": float(1.0 - probs[i, benign_idx]),
             "msp_score": float(msp[i]),
             "energy_score": float(energy[i]),
+            "knn_score": float(knn_scores[i]),
             "probabilities": probs[i].tolist(),
         })
     return rows
@@ -244,10 +267,11 @@ MODEL_OPTIONS = {
 }
 
 
-def run_inference(model_key: str, domains: list[str]) -> list[dict]:
+def run_inference(model_key: str, domains: list[str], scorer: str = "MSP") -> list[dict]:
     if model_key == "bilstm":
         model, energy_T = _load_bilstm()
-        return _neural_predict(model, domains, energy_T)
+        knn = _load_knn() if scorer == "KNN" else None
+        return _neural_predict(model, domains, energy_T, knn_index=knn)
     if model_key == "bilstm_oe":
         model, energy_T = _load_bilstm_oe()
         return _neural_predict(model, domains, energy_T)
@@ -272,12 +296,31 @@ _DGA_FAMILIES = {
 }
 
 
-def _verdict(row: dict, threshold: float) -> tuple[str, str]:
-    is_ood = row["msp_score"] > threshold
+def _ood_score(row: dict, scorer: str) -> float:
+    """Return the OOD score for the chosen scorer (higher = more OOD)."""
+    if scorer == "Energy":
+        v = row.get("energy_score", float("nan"))
+        return float(-v) if v == v else 0.0    # negate: less negative = more OOD
+    if scorer == "KNN":
+        v = row.get("knn_score", float("nan"))
+        return float(v) if v == v else 0.0     # larger distance = more OOD
+    return float(row["msp_score"])             # MSP: 0-1, higher = more OOD
+
+
+def _verdict(row: dict, threshold: float, scorer: str = "MSP") -> tuple[str, str]:
+    score = _ood_score(row, scorer)
+    # threshold slider is 0.1–0.9; rescale for Energy/KNN to their natural range
+    if scorer == "Energy":
+        is_ood = score > threshold * 20        # Energy negated range ≈ 0–20
+    elif scorer == "KNN":
+        is_ood = score > threshold * 17        # calibrated: known p95≈8.56, 0.5×17=8.5
+    else:
+        is_ood = score > threshold             # MSP: 0–1
+
     cls = row["predicted_class"]
     if is_ood:
         return "Unknown / OOD", "#e74c3c"
-    if cls in ("benign",):
+    if cls == "benign":
         return "Benign", "#27ae60"
     return f"DGA – {cls}", "#e67e22"
 
@@ -311,17 +354,32 @@ tab_detect, tab_compare, tab_eda = st.tabs(["Domain Detection", "Model Compariso
 # TAB 1 – DOMAIN DETECTION
 # ══════════════════════════════════════════════════════════════════════════════
 
+_SCORER_OPTIONS = {
+    "bilstm":    ["MSP", "Energy", "KNN"],
+    "bilstm_oe": ["MSP", "Energy"],
+    "cnn":       ["MSP", "Energy"],
+    "lgbm_mc":   ["MSP"],
+    "lgbm":      ["MSP"],
+}
+
 with tab_detect:
     with st.sidebar:
         st.header("Settings")
         selected_model_label = st.selectbox("Model", list(MODEL_OPTIONS.keys()))
         selected_model_key = MODEL_OPTIONS[selected_model_label]
 
+        available_scorers = _SCORER_OPTIONS[selected_model_key]
+        selected_scorer = st.selectbox(
+            "OOD Scorer",
+            options=available_scorers,
+            help="MSP: 1 − max softmax prob · Energy: −T·log Σ exp(logit/T). "
+                 "Higher score → more likely OOD.",
+        )
+
         ood_threshold = st.slider(
-            "OOD threshold (MSP score)",
+            f"OOD threshold ({selected_scorer})",
             min_value=0.10, max_value=0.90, value=0.50, step=0.05,
-            help="Domains whose MSP score exceeds this are flagged as unknown/OOD. "
-                 "Not applicable to LGBM (binary output).",
+            help="Domains whose OOD score exceeds this are flagged as Unknown/OOD.",
         )
         st.divider()
         st.subheader("Known DGA families (19)")
@@ -353,16 +411,16 @@ with tab_detect:
         if not domains:
             st.warning("Enter at least one domain.")
         else:
-            with st.spinner(f"Running {selected_model_label}…"):
-                results = run_inference(selected_model_key, domains)
+            with st.spinner(f"Running {selected_model_label} · scorer: {selected_scorer}…"):
+                results = run_inference(selected_model_key, domains, scorer=selected_scorer)
 
             st.divider()
-            st.subheader(f"Results — {len(results)} domain(s)  ·  model: **{selected_model_label}**")
+            st.subheader(f"Results — {len(results)} domain(s)  ·  {selected_model_label}  ·  scorer: **{selected_scorer}**")
 
             is_lgbm = selected_model_key in ("lgbm", "lgbm_mc")
             table_rows = []
             for r in results:
-                verdict, _ = _verdict(r, ood_threshold)
+                verdict, _ = _verdict(r, ood_threshold, selected_scorer)
                 row = {
                     "Domain": r["domain"],
                     "Prediction": r["predicted_class"],
@@ -371,8 +429,12 @@ with tab_detect:
                     "Verdict": verdict if not is_lgbm else ("Benign" if r["predicted_class"] == "benign" else "DGA"),
                 }
                 if not is_lgbm:
-                    row["MSP score"] = f"{r['msp_score']:.4f}"
-                    row["Energy score"] = f"{r['energy_score']:.4f}" if not pd.isna(r["energy_score"]) else "—"
+                    row["MSP score"]    = f"{r['msp_score']:.4f}"
+                    ev = r.get("energy_score", float("nan"))
+                    row["Energy score"] = f"{ev:.4f}" if ev == ev else "—"
+                    kv = r.get("knn_score", float("nan"))
+                    row["KNN score"]    = f"{kv:.4f}" if kv == kv else "—"
+                    row[f"↳ Active ({selected_scorer})"] = f"{_ood_score(r, selected_scorer):.4f}"
                 table_rows.append(row)
 
             df_res = pd.DataFrame(table_rows)
@@ -386,13 +448,14 @@ with tab_detect:
                 len(results) == 1 or st.checkbox("Show probability charts", value=len(results) <= 5)
             ):
                 for r in results:
-                    verdict, color = _verdict(r, ood_threshold)
-                    with st.expander(f"**{r['domain']}** — {_badge(verdict, color)}", expanded=len(results) == 1):
+                    verdict, color = _verdict(r, ood_threshold, selected_scorer)
+                    icon = "🟢" if verdict == "Benign" else ("🔴" if verdict == "Unknown / OOD" else "🟠")
+                    with st.expander(f"{icon} {r['domain']}  —  {verdict}", expanded=len(results) == 1):
                         c1, c2, c3, c4 = st.columns(4)
                         c1.metric("Predicted class", r["predicted_class"].upper())
                         c2.metric("Confidence", f"{r['confidence']:.1%}")
                         c3.metric("DGA probability", f"{r['dga_prob']:.1%}")
-                        c4.metric("MSP score", f"{r['msp_score']:.3f}")
+                        c4.metric(f"{selected_scorer} score", f"{_ood_score(r, selected_scorer):.4f}")
                         prob_df = pd.DataFrame({
                             "Class": _CLASSES, "Probability": r["probabilities"],
                         }).sort_values("Probability", ascending=False)
@@ -506,6 +569,12 @@ with tab_compare:
         df_mc[col] = df_mc[col].apply(_fmt)
     st.dataframe(df_mc, use_container_width=True, hide_index=True)
 
+    mc_metric_chart = st.selectbox("Visualise metric ", ["Macro F1", "MC Accuracy", "Macro Precision", "Macro Recall"], key="mc_metric")
+    mc_chart_data = df_mc.set_index("Model")[mc_metric_chart].apply(
+        lambda x: float(x) if x != "—" else None
+    ).dropna().sort_values(ascending=False)
+    st.bar_chart(mc_chart_data.rename(mc_metric_chart), height=240)
+
     # ── 3. OOD detection ──────────────────────────────────────────────────
     st.markdown("#### OOD detection — unknown_family (best scorer per model)")
     st.caption("AUPR-out = precision-recall AUC treating OOD as positive · Precision@TPR95 = precision when recall=95%")
@@ -562,9 +631,31 @@ with tab_eda:
 
     eda_f = eda[eda["class_label"].isin(selected_classes)]
 
-    st.markdown("### Class distribution")
-    cc = eda_f["class_label"].value_counts().sort_values(ascending=False)
-    st.bar_chart(cc.rename("count"), height=280)
+    # ── real class distribution from training data ────────────────────────
+    st.markdown("### Class distribution (training set)")
+    dist_path = ROOT / "data" / "eda" / "class_distribution.json"
+    if dist_path.exists():
+        with open(dist_path) as f:
+            real_dist = json.load(f)
+        dist_series = pd.Series(real_dist).loc[
+            [c for c in real_dist if c in selected_classes]
+        ].sort_values(ascending=False)
+        n_benign = real_dist.get("benign", 0)
+        n_dga = dist_series.sum() - n_benign
+        st.caption(f"Total: {dist_series.sum():,} domains · Benign: {n_benign:,} · DGA: {n_dga:,}")
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("**Benign vs DGA (tổng)**")
+            overview = pd.Series({"Benign": n_benign, "DGA (all families)": n_dga})
+            st.bar_chart(overview.rename("# samples"), height=260)
+        with col_b:
+            st.markdown("**Từng DGA family**")
+            dga_only = dist_series.drop(index="benign", errors="ignore").sort_values(ascending=False)
+            st.bar_chart(dga_only.rename("# samples"), height=260)
+    else:
+        cc = eda_f["class_label"].value_counts().sort_values(ascending=False)
+        st.bar_chart(cc.rename("count"), height=280)
 
     st.markdown(f"### `{selected_feature}` distribution by class")
     pivot = (

@@ -36,8 +36,8 @@ RED    = "#DC2626"
 # Figure 1 - Classification accuracy (MC-Acc / Binary AUC)
 # ══════════════════════════════════════════════════════════════════════════════
 models   = ["20-class\nLGBM", "Char-CNN", "BiLSTM"]
-mc_acc   = [0.654,  0.926,  0.935]
-bin_auc  = [0.946,  0.995,  0.996]
+mc_acc   = [0.7747, 0.9284, 0.9409]
+bin_auc  = [0.9690, 0.9964, 0.9968]
 
 fig, ax = plt.subplots(figsize=(7, 4.5))
 x = np.arange(len(models))
@@ -73,7 +73,7 @@ print(f"[OK] {OUT_DIR}/fig1_classification.png")
 # Figure 2 - OOD unknown_family
 # ══════════════════════════════════════════════════════════════════════════════
 uf_labels = ["LGBM\nMSP", "Char-CNN\nMSP", "BiLSTM\nMSP", "BiLSTM\nEnergy\n(best)"]
-uf_auroc  = [0.550,       0.670,           0.661,           0.836               ]
+uf_auroc  = [0.5789,      0.6912,          0.6947,          0.8607              ]
 uf_colors = [GRAY,        GRAY,            GRAY,            GREEN               ]
 
 fig, ax = plt.subplots(figsize=(7, 4.8))
@@ -102,7 +102,7 @@ print(f"[OK] {OUT_DIR}/fig2_ood_unknown_family.png")
 # Figure 3 - OOD unknown_ood
 # ══════════════════════════════════════════════════════════════════════════════
 oo_labels = ["LGBM\nMSP", "BiLSTM\nEnergy", "Char-CNN\nKNN k=5", "BiLSTM\nKNN k=5\n(best)"]
-oo_auroc  = [0.529,       0.571,           0.680,              0.707              ]
+oo_auroc  = [0.5634,      0.5876,          0.6909,             0.7182             ]
 oo_colors = [GRAY,        GRAY,            BLUE,               GREEN              ]
 
 fig, ax = plt.subplots(figsize=(7, 4.8))
@@ -130,9 +130,9 @@ print(f"[OK] {OUT_DIR}/fig3_ood_unknown_ood.png")
 # ══════════════════════════════════════════════════════════════════════════════
 # Figure 4 - So sanh Energy vs KNN tren hai split
 # ══════════════════════════════════════════════════════════════════════════════
-splits  = ["unknown_family\n(ho DGA moi)", "unknown_ood\n(domain legitimate)"]
-energy  = [0.836, 0.571]
-knn     = [0.647, 0.707]
+splits  = ["unknown_family\n(unseen DGA families)", "unknown_ood\n(real-world domains)"]
+energy  = [0.8607, 0.5876]
+knn     = [0.6244, 0.7182]
 
 x = np.arange(len(splits))
 w = 0.3
@@ -143,10 +143,10 @@ b2 = ax.bar(x + w/2, knn,    w, label="BiLSTM + KNN k=5", color=BLUE,   zorder=3
 
 for bar, val in zip(b1, energy):
     ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-            f"{val:.3f}", ha="center", fontsize=11, color=ORANGE, fontweight="bold")
+            f"{val:.4f}", ha="center", fontsize=11, color=ORANGE, fontweight="bold")
 for bar, val in zip(b2, knn):
     ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-            f"{val:.3f}", ha="center", fontsize=11, color=BLUE, fontweight="bold")
+            f"{val:.4f}", ha="center", fontsize=11, color=BLUE, fontweight="bold")
 
 ax.set_xticks(x)
 ax.set_xticklabels(splits, fontsize=11)
@@ -169,13 +169,13 @@ print(f"[OK] {OUT_DIR}/fig4_energy_vs_knn.png")
 import glob
 
 # Tim bilstm dir tu dong
-_bilstm_dirs = sorted(glob.glob("baseline_out/bilstm_*/"))
-_bilstm_dir = _bilstm_dirs[-1].rstrip("/") if _bilstm_dirs else "baseline_out/bilstm_20260414_222503"
+_bilstm_dirs = sorted(glob.glob("baseline_out/bilstm_[0-9]*/"))
+_bilstm_dir = _bilstm_dirs[-1].rstrip("/") if _bilstm_dirs else "baseline_out/bilstm_20260531_015530"
 
 _score_files = {
-    "known (ID)":               f"{_bilstm_dir}/scores_energy_known.csv",
-    "unknown family (DGA moi)": f"{_bilstm_dir}/scores_energy_unknown_family.csv",
-    "unknown OOD (legitimate)": f"{_bilstm_dir}/scores_energy_unknown_ood.csv",
+    "known (ID)":                    f"{_bilstm_dir}/scores_energy_known.csv",
+    "unknown family (unseen DGA)":   f"{_bilstm_dir}/scores_energy_unknown_family.csv",
+    "unknown OOD (real-world)":      f"{_bilstm_dir}/scores_energy_unknown_ood.csv",
 }
 
 _loaded = {}
@@ -188,9 +188,9 @@ for _label, _path in _score_files.items():
 
 if len(_loaded) >= 2:
     _colors = {
-        "known (ID)":               BLUE,
-        "unknown family (DGA moi)": ORANGE,
-        "unknown OOD (legitimate)": GRAY,
+        "known (ID)":                  BLUE,
+        "unknown family (unseen DGA)": ORANGE,
+        "unknown OOD (real-world)":    GRAY,
     }
     _SAMPLE = 10_000
 
@@ -204,7 +204,7 @@ if len(_loaded) >= 2:
                 color=_colors.get(_label, GRAY), label=_label)
     ax.set_xlabel("OOD Score (Energy)", fontsize=11)
     ax.set_ylabel("Density", fontsize=11)
-    ax.set_title("Phan phoi OOD Score - BiLSTM Energy", fontsize=12, fontweight="bold")
+    ax.set_title("Score Distribution – BiLSTM + Energy", fontsize=12, fontweight="bold")
     ax.legend(fontsize=9)
 
     ax2 = axes[1]
@@ -223,7 +223,7 @@ if len(_loaded) >= 2:
     ax2.set_xticks(range(1, len(_box_labels) + 1))
     ax2.set_xticklabels(_box_labels, fontsize=9)
     ax2.set_ylabel("OOD Score (Energy)", fontsize=11)
-    ax2.set_title("Box Plot - phan tach ID vs OOD", fontsize=12, fontweight="bold")
+    ax2.set_title("Boxplot: ID vs OOD Separation", fontsize=12, fontweight="bold")
 
     fig.suptitle(
         "Confidence Score Distribution: in-distribution vs OOD (BiLSTM + Energy)",
@@ -239,9 +239,9 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # Figure 6 - Benign overfit analysis: per-source OOD score breakdown
 # ══════════════════════════════════════════════════════════════════════════════
-_bilstm_dirs = sorted(glob.glob("baseline_out/bilstm_*/"))
-_bilstm_dir  = _bilstm_dirs[-1].rstrip("/") if _bilstm_dirs else "baseline_out/bilstm_20260414_222503"
-_dataset_dir = "data/processed"
+_bilstm_dirs = sorted(glob.glob("baseline_out/bilstm_[0-9]*/"))
+_bilstm_dir  = _bilstm_dirs[-1].rstrip("/") if _bilstm_dirs else "baseline_out/bilstm_20260531_015530"
+_dataset_dir = "../data/processed"
 
 try:
     _ood_meta  = pd.read_csv(f"{_dataset_dir}/unknown_ood/test_unknown_ood.csv")
