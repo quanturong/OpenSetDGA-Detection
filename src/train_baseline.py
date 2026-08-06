@@ -18,6 +18,7 @@ Usage:
 import argparse
 import json
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -179,7 +180,11 @@ def main():
     ap.add_argument("--max_depth", type=int, default=-1)
     ap.add_argument("--energy_T", type=float, default=1.0, help="Temperature for energy score")
     ap.add_argument("--no_cache", action="store_true", help="Disable feature caching")
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.out_dir) if args.out_dir else Path("baseline_out") / f"run_{ts}"
@@ -219,7 +224,7 @@ def main():
         "class_weight": "balanced",
         "verbose": -1,
         "n_jobs": -1,
-        "random_state": 42,
+        "random_state": args.seed,
     }
     model = lgb.LGBMClassifier(**params)
     model.fit(

@@ -19,6 +19,7 @@ Usage:
 
 import argparse
 import json
+import random
 import sys
 import time
 from pathlib import Path
@@ -123,7 +124,11 @@ def main():
     ap.add_argument("--knn_k", type=int, default=5)
     ap.add_argument("--knn_subsample", type=int, default=50_000)
     ap.add_argument("--no_cache", action="store_true")
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.out_dir) if args.out_dir else Path("baseline_out") / f"multiclass_{ts}"
@@ -173,7 +178,7 @@ def main():
         class_weight="balanced",
         verbose=-1,
         n_jobs=-1,
-        random_state=42,
+        random_state=args.seed,
     )
     model.fit(
         Xs["train"], y["train"],

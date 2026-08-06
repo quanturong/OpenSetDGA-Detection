@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import json
+import random
 import time
 from itertools import cycle
 from pathlib import Path
@@ -174,7 +175,13 @@ def main():
     ap.add_argument("--energy_T", type=float, default=1.0)
     ap.add_argument("--knn_k", type=int, default=5)
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.out_dir) if args.out_dir else Path("baseline_out") / f"bilstm_oe_{ts}"
@@ -195,7 +202,7 @@ def main():
 
     # Split unknown_ood 50/50: oe_train (for training) vs oe_test (held-out eval)
     unk_ood_all = pd.read_csv(str(run_dir / "unknown_ood" / "test_unknown_ood.csv"))
-    unk_ood_all = unk_ood_all.sample(frac=1, random_state=42).reset_index(drop=True)
+    unk_ood_all = unk_ood_all.sample(frac=1, random_state=args.seed).reset_index(drop=True)
     mid = min(args.oe_train_size, len(unk_ood_all) // 2)
     dfs["oe_train"] = unk_ood_all.iloc[:mid].reset_index(drop=True)
     dfs["oe_test"]  = unk_ood_all.iloc[mid:mid * 2].reset_index(drop=True)

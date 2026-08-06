@@ -26,6 +26,9 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import LabelEncoder
 
 from ood_utils import ood_metrics, print_ood_metrics
+from logger import get_logger
+
+log = get_logger(__name__)
 
 # ── tokenization (shared) ────────────────────────────────────────────────────
 

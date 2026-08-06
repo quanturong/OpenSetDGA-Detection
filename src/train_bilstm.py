@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import json
+import random
 import time
 from pathlib import Path
 
@@ -234,7 +235,13 @@ def main():
     ap.add_argument("--energy_T", type=float, default=1.0,
                     help="Temperature for energy score")
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.out_dir) if args.out_dir else Path("baseline_out") / f"bilstm_{ts}"
