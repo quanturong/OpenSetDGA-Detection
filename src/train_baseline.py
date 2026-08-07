@@ -252,7 +252,7 @@ def main():
 
     # ID scores come from test_known
     proba_known = model.predict_proba(Xs["test_known"])
-    raw_known = model.booster_.predict(Xs["test_known"])  # raw log-odds for energy
+    raw_known = model.booster_.predict(Xs["test_known"], raw_score=True)  # raw log-odds for energy
 
     ood_splits = {
         "unknown_family": "unknown_family",
@@ -269,7 +269,7 @@ def main():
                 proba_ood = model.predict_proba(Xs[split_key])
                 ood_scores = _msp_score(proba_ood)
             else:
-                raw_ood = model.booster_.predict(Xs[split_key])
+                raw_ood = model.booster_.predict(Xs[split_key], raw_score=True)
                 ood_scores = _energy_score(raw_ood, T=args.energy_T)
 
             metrics = _ood_metrics(id_scores, ood_scores)
