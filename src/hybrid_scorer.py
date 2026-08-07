@@ -62,6 +62,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bilstm_dir",     default=None)
     ap.add_argument("--multiclass_dir", default=None)
+    ap.add_argument("--extra_ood_dir",  default=None)
     ap.add_argument("--out_dir",        default=None)
     ap.add_argument("--ood_cal_frac",   type=float, default=0.5,
                     help="Fraction of unknown_ood used for LogReg calibration")
@@ -72,23 +73,30 @@ def main():
     # ── locate run dirs ──────────────────────────────────────────────────────
     baseline = Path("baseline_out")
 
+    # argparse flag name for each auto-detected prefix
+    _flag = {"bilstm": "--bilstm_dir", "multiclass": "--multiclass_dir",
+             "extra_ood": "--extra_ood_dir"}
+
     def _find_latest(prefix: str) -> Path:
-        # Exclude bilstm_oe_* when prefix is "bilstm"; sort by mtime, not name
+        # Exclude bilstm_oe_* when prefix is "bilstm"; pick by mtime, not name
         runs = [r for r in baseline.glob(f"{prefix}_*")
                 if not r.name.startswith(f"{prefix}_oe")]
         if not runs:
             raise FileNotFoundError(f"No run matching '{prefix}_*' in {baseline}")
         chosen = max(runs, key=lambda p: p.stat().st_mtime)
-        print(f"[auto-detect] {prefix}: {chosen}  "
-              f"(mtime {__import__('datetime').datetime.fromtimestamp(chosen.stat().st_mtime):%Y-%m-%d %H:%M:%S})")
-        print(f"  WARNING: pass --{prefix}_dir explicitly to avoid mixing seeds.")
+        import datetime as _dt
+        mtime = _dt.datetime.fromtimestamp(chosen.stat().st_mtime)
+        print(f"[auto-detect] {prefix}: {chosen}  (mtime {mtime:%Y-%m-%d %H:%M:%S})")
+        print(f"  WARNING: pass {_flag[prefix]} explicitly to avoid mixing seeds.")
         return chosen
 
     bilstm_dir     = Path(args.bilstm_dir)     if args.bilstm_dir     else _find_latest("bilstm")
     multiclass_dir = Path(args.multiclass_dir) if args.multiclass_dir else _find_latest("multiclass")
 
     # Prefer BiLSTM KNN scores (neural features) over LightGBM KNN if available
-    extra_ood_dir = _find_latest("extra_ood") if not args.bilstm_dir else None
+    extra_ood_dir = (Path(args.extra_ood_dir) if args.extra_ood_dir
+                     else _find_latest("extra_ood") if not args.bilstm_dir
+                     else None)
     bilstm_knn_dir = None
     if extra_ood_dir and (extra_ood_dir / "scores_bilstm_knn_k5_known.csv").exists():
         bilstm_knn_dir = extra_ood_dir
