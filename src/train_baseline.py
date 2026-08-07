@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     classification_report,
     f1_score,
     roc_auc_score,
@@ -130,14 +131,11 @@ def _ood_metrics(id_scores: np.ndarray, ood_scores: np.ndarray, tpr_target: floa
     realized_tpr = float((ood_s >= threshold).mean())
     fpr = float((id_s >= threshold).mean())
 
-    # AUPR-OUT
-    scores_all = pd.concat([id_s, ood_s], ignore_index=True)
-    labels_out = pd.Series([0] * n_id + [1] * n_ood, dtype=int)
-    aupr_out = _aupr(scores_all, labels_out)
-
-    # AUPR-IN
-    labels_in = pd.Series([1] * n_id + [0] * n_ood, dtype=int)
-    aupr_in = _aupr(-scores_all, labels_in)
+    # AUPR-OUT / AUPR-IN  (sklearn handles ties correctly via threshold averaging)
+    scores_all = np.concatenate([id_scores, ood_scores])
+    labels_ood = np.array([0] * n_id + [1] * n_ood, dtype=int)
+    aupr_out = float(average_precision_score(labels_ood, scores_all))
+    aupr_in  = float(average_precision_score(1 - labels_ood, -scores_all))
 
     return {
         "auroc": float(auroc),
@@ -147,23 +145,6 @@ def _ood_metrics(id_scores: np.ndarray, ood_scores: np.ndarray, tpr_target: floa
         "tpr_target": tpr_target,
         "realized_tpr": float(realized_tpr),
     }
-
-
-def _aupr(scores: pd.Series, labels: pd.Series) -> float:
-    df = pd.DataFrame({"score": scores.values, "label": labels.values}).sort_values("score", ascending=False)
-    tp = fp = 0
-    p = int((df["label"] == 1).sum())
-    precisions = [1.0]
-    recalls = [0.0]
-    for _, row in df.iterrows():
-        if row["label"] == 1:
-            tp += 1
-        else:
-            fp += 1
-        precisions.append(tp / (tp + fp))
-        recalls.append(tp / p if p > 0 else 0.0)
-    area = sum((recalls[i] - recalls[i - 1]) * precisions[i] for i in range(1, len(recalls)))
-    return float(max(0.0, min(1.0, area)))
 
 
 # ── main ────────────────────────────────────────────────────────────────────
