@@ -137,11 +137,17 @@ def _ood_metrics(id_scores: np.ndarray, ood_scores: np.ndarray, tpr_target: floa
     aupr_out = float(average_precision_score(labels_ood, scores_all))
     aupr_in  = float(average_precision_score(1 - labels_ood, -scores_all))
 
+    # Precision@TPR: precision at the operating point used for FPR@TPR
+    tp = realized_tpr * n_ood
+    fp = fpr * n_id
+    precision_at_tpr = tp / (tp + fp) if (tp + fp) > 0 else float("nan")
+
     return {
         "auroc": float(auroc),
         "aupr_out": float(aupr_out),
         "aupr_in": float(aupr_in),
         "fpr_at_tpr": float(fpr),
+        "precision_at_tpr": float(precision_at_tpr),
         "tpr_target": tpr_target,
         "realized_tpr": float(realized_tpr),
     }
