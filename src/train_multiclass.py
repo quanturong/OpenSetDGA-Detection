@@ -68,11 +68,13 @@ def msp_score(proba: np.ndarray) -> np.ndarray:
     return 1.0 - proba.max(axis=1)
 
 
-def energy_score(proba: np.ndarray, T: float = 1.0) -> np.ndarray:
-    """Energy-based OOD score. Higher = more OOD."""
-    log_p = np.log(np.clip(proba, 1e-30, None))
-    lse = T * np.log(np.sum(np.exp(log_p / T), axis=1))
-    return -lse
+def energy_score(raw_logits: np.ndarray, T: float = 1.0) -> np.ndarray:
+    """Energy score from raw LightGBM multiclass logits. Higher = more OOD.
+    E = -T·logsumexp(logits/T), numerically stable via max subtraction."""
+    z = raw_logits / T
+    z_max = z.max(axis=1, keepdims=True)
+    lse = z_max.squeeze(axis=1) + np.log(np.sum(np.exp(z - z_max), axis=1))
+    return -T * lse
 
 
 def build_knn(X_train: np.ndarray, k: int = 5, subsample: int = 50_000, seed: int = 42):
@@ -234,8 +236,10 @@ def main():
     # ── 7. Pre-compute model probabilities ───────────────────────────────
     log.info("\nScoring all splits …")
     probas = {}
+    raw_scores = {}
     for k in ["test_known", "unknown_family", "unknown_ood"]:
         probas[k] = model.predict_proba(Xs[k])
+        raw_scores[k] = model.booster_.predict(Xs[k], raw_score=True)
 
     # ── 8. OOD evaluation ────────────────────────────────────────────────
     log.info("\n" + "=" * 65)
@@ -244,7 +248,7 @@ def main():
 
     scorer_fns = {
         "msp": lambda k: msp_score(probas[k]),
-        "energy": lambda k: energy_score(probas[k], T=args.energy_T),
+        "energy": lambda k: energy_score(raw_scores[k], T=args.energy_T),
         "knn": lambda k: knn_score(nn, scaler, Xs[k]),
     }
 

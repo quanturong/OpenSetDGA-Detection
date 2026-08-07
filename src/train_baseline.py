@@ -86,13 +86,12 @@ def _msp_score(proba: np.ndarray) -> np.ndarray:
     return 1.0 - proba.max(axis=1)
 
 
-def _energy_score(proba: np.ndarray, T: float = 1.0) -> np.ndarray:
-    """Energy-based OOD score.  Higher = more likely OOD.
-    For a probability model we use -T*log(sum(exp(log(p)/T)))
-    which reduces to -T*logsumexp(log(p)/T)."""
-    log_p = np.log(np.clip(proba, 1e-30, None))
-    lse = np.log(np.sum(np.exp(log_p / T), axis=1))
-    return -T * lse  # more negative for confident → we negate so higher = OOD
+def _energy_score(raw_logit: np.ndarray, T: float = 1.0) -> np.ndarray:
+    """Energy score from raw LightGBM log-odds. Higher = more OOD.
+    Symmetric two-class logits [-z/2, z/2]: E = -T·log(2·cosh(z/(2T))).
+    Numerically stable via: log(2·cosh(w)) = |w| + log1p(exp(-2|w|))."""
+    w = np.abs(raw_logit) / (2.0 * T)
+    return -T * (w + np.log1p(np.exp(-2.0 * w)))
 
 
 # ── evaluation helpers ──────────────────────────────────────────────────────
@@ -253,21 +252,25 @@ def main():
 
     # ID scores come from test_known
     proba_known = model.predict_proba(Xs["test_known"])
-    msp_known = _msp_score(proba_known)
-    energy_known = _energy_score(proba_known, T=args.energy_T)
+    raw_known = model.booster_.predict(Xs["test_known"])  # raw log-odds for energy
 
     ood_splits = {
         "unknown_family": "unknown_family",
         "unknown_ood": "unknown_ood",
     }
 
-    for score_name, score_fn in [("msp", _msp_score), ("energy", lambda p: _energy_score(p, T=args.energy_T))]:
+    for score_name in ["msp", "energy"]:
         log.info(f"\n── Score: {score_name} ──")
-        id_scores = score_fn(proba_known)
+        id_scores = (_msp_score(proba_known) if score_name == "msp"
+                     else _energy_score(raw_known, T=args.energy_T))
 
         for split_label, split_key in ood_splits.items():
-            proba_ood = model.predict_proba(Xs[split_key])
-            ood_scores = score_fn(proba_ood)
+            if score_name == "msp":
+                proba_ood = model.predict_proba(Xs[split_key])
+                ood_scores = _msp_score(proba_ood)
+            else:
+                raw_ood = model.booster_.predict(Xs[split_key])
+                ood_scores = _energy_score(raw_ood, T=args.energy_T)
 
             metrics = _ood_metrics(id_scores, ood_scores)
             results[f"ood_{score_name}_{split_label}"] = metrics
