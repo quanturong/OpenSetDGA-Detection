@@ -73,7 +73,9 @@ def main():
     baseline = Path("baseline_out")
 
     def _find_latest(prefix: str) -> Path:
-        runs = sorted(baseline.glob(f"{prefix}_*"))
+        # Match exactly bilstm_<timestamp or seed> but not bilstm_oe_*
+        runs = sorted(r for r in baseline.glob(f"{prefix}_*")
+                      if not r.name.startswith(f"{prefix}_oe"))
         if not runs:
             raise FileNotFoundError(f"No run matching '{prefix}_*' in {baseline}")
         return runs[-1]

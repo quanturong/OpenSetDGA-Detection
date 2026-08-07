@@ -96,13 +96,13 @@ def main():
     labels_in = pd.Series([1] * len(id_scores) + [0] * len(ood_scores), dtype=int)
     aupr_in = _aupr(-scores_all, labels_in)
 
-    log.info("OOD evaluation results")
-    log.info(f"known_count: {len(id_scores):,}")
-    log.info(f"ood_count:   {len(ood_scores):,}")
-    log.info(f"AUROC:       {auroc:.6f}")
-    log.info(f"AUPR-OUT:    {aupr_out:.6f}")
-    log.info(f"AUPR-IN:     {aupr_in:.6f}")
-    log.info(f"FPR@TPR={args.tpr_target:.2f}: {fpr:.6f} (realized TPR={realized_tpr:.6f})")
+    print("OOD evaluation results")
+    print(f"known_count: {len(id_scores):,}")
+    print(f"ood_count:   {len(ood_scores):,}")
+    print(f"AUROC:       {auroc:.6f}")
+    print(f"AUPR-OUT:    {aupr_out:.6f}")
+    print(f"AUPR-IN:     {aupr_in:.6f}")
+    print(f"FPR@TPR={args.tpr_target:.2f}: {fpr:.6f} (realized TPR={realized_tpr:.6f})")
 
 
 if __name__ == "__main__":

@@ -28,7 +28,8 @@ def energy_with_temperature(logits: np.ndarray, T: float = 1.0) -> np.ndarray:
     Returns shape (N,).
     """
     scaled = logits / T
-    return -T * np.log(np.exp(scaled).sum(axis=1))
+    scaled_shifted = scaled - scaled.max(axis=1, keepdims=True)
+    return -T * (scaled.max(axis=1) + np.log(np.exp(scaled_shifted).sum(axis=1)))
 
 
 def find_best_temperature(

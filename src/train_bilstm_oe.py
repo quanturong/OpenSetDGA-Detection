@@ -157,7 +157,7 @@ def _extract_features(model: DomainBiLSTM, loader: DataLoader,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run_dir", default="../data/processed")
+    ap.add_argument("--run_dir", default="data/processed")
     ap.add_argument("--out_dir", default=None)
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--batch", type=int, default=512)
@@ -268,7 +268,8 @@ def main():
 
             # OE batch (cycle to match ID batch count)
             oe_batch = next(oe_iter)
-            oe_x = oe_batch[0].to(device)
+            oe_x  = oe_batch[0].to(device)
+            oe_lb = oe_batch[1].to(device)
 
             optimizer.zero_grad()
 
@@ -277,7 +278,7 @@ def main():
             loss_ce = criterion(logit, yb)
 
             # OE loss: push OE toward uniform
-            oe_logit = model(oe_x, return_feats=False)
+            oe_logit = model(oe_x, oe_lb, return_feats=False)
             loss_oe = -F.log_softmax(oe_logit, dim=1).mean()
 
             loss = loss_ce + args.lambda_oe * loss_oe
