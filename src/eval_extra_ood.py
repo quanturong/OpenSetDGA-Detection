@@ -185,15 +185,19 @@ def odin_score(model, tokens, device, T=1000.0, epsilon=0.001,
 
         if is_bilstm:
             lb = lengths[i:i + batch_size].to(device)
-            logit, _ = model.forward_from_embed(emb, lb)
+            # cuDNN RNN does not support backward in eval mode; disable cuDNN
+            with torch.backends.cudnn.flags(enabled=False):
+                logit, _ = model.forward_from_embed(emb, lb)
+                scaled_soft = F.softmax(logit / T, dim=-1)
+                loss = scaled_soft.max(dim=-1)[0].sum()
+                loss.backward()
         else:
             logit, _ = model.forward_from_embed(emb)
-
-        # Temperature-scaled softmax — maximize predicted class confidence
-        scaled_soft = F.softmax(logit / T, dim=-1)
-        max_soft = scaled_soft.max(dim=-1)[0]
-        loss = max_soft.sum()
-        loss.backward()
+            # Temperature-scaled softmax — maximize predicted class confidence
+            scaled_soft = F.softmax(logit / T, dim=-1)
+            max_soft = scaled_soft.max(dim=-1)[0]
+            loss = max_soft.sum()
+            loss.backward()
 
         # Perturb embedding to INCREASE confidence (ODIN paper: gradient ascent)
         if epsilon > 0 and emb.grad is not None:
