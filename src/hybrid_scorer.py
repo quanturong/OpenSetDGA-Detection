@@ -73,12 +73,16 @@ def main():
     baseline = Path("baseline_out")
 
     def _find_latest(prefix: str) -> Path:
-        # Match exactly bilstm_<timestamp or seed> but not bilstm_oe_*
-        runs = sorted(r for r in baseline.glob(f"{prefix}_*")
-                      if not r.name.startswith(f"{prefix}_oe"))
+        # Exclude bilstm_oe_* when prefix is "bilstm"; sort by mtime, not name
+        runs = [r for r in baseline.glob(f"{prefix}_*")
+                if not r.name.startswith(f"{prefix}_oe")]
         if not runs:
             raise FileNotFoundError(f"No run matching '{prefix}_*' in {baseline}")
-        return runs[-1]
+        chosen = max(runs, key=lambda p: p.stat().st_mtime)
+        print(f"[auto-detect] {prefix}: {chosen}  "
+              f"(mtime {__import__('datetime').datetime.fromtimestamp(chosen.stat().st_mtime):%Y-%m-%d %H:%M:%S})")
+        print(f"  WARNING: pass --{prefix}_dir explicitly to avoid mixing seeds.")
+        return chosen
 
     bilstm_dir     = Path(args.bilstm_dir)     if args.bilstm_dir     else _find_latest("bilstm")
     multiclass_dir = Path(args.multiclass_dir) if args.multiclass_dir else _find_latest("multiclass")
